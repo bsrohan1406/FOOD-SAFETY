@@ -1,943 +1,841 @@
 import React, { useState } from 'react';
 import { 
+  ShieldAlert, 
   Camera, 
-  FileText, 
-  CheckCircle2, 
-  AlertTriangle, 
-  Scale, 
-  Building, 
+  MapPin, 
   Mic, 
   MicOff, 
-  Search, 
-  Trash2, 
-  Plus, 
-  ArrowRight, 
+  FileText, 
   Upload, 
-  ShieldCheck, 
-  Sparkles,
+  CheckCircle2, 
+  AlertTriangle, 
+  Trash2, 
+  Building2, 
+  Sparkles, 
+  Search, 
+  ExternalLink,
   Info,
   Clock,
-  Layers
+  ArrowRight
 } from 'lucide-react';
-import { 
-  GrievanceType, 
-  CapturedEvidence, 
-  GrievanceDossier, 
-  CitizenProfile, 
-  FSSAILicensee 
-} from '../types';
-import { 
-  isValidFSSAILicense, 
-  scanStatutoryJurisdiction, 
-  calculatePriorityLevel,
-  calculateStatutoryBountyINR,
-  generateEvidenceHash,
-  STATUTORY_KEYWORD_RULES
-} from '../utils/foodSafetyRules';
+import { CitizenUser, IssueType, GrievanceImage, Grievance, FSSAIBusinessRecord } from '../types';
+import { MOCK_FSSAI_DATABASE, MOCK_OFFICIALS } from '../data/mockDatabase';
 import { LiveCameraCaptureModal } from './LiveCameraCaptureModal';
+import { 
+  scanFSSAIJurisdiction, 
+  generateGrievanceHash, 
+  calculateGrievancePriority, 
+  calculateCitizenReward 
+} from '../utils/foodSafetyRules';
 
 interface GrievanceFilingWizardProps {
-  citizen: CitizenProfile;
-  fssaiRegistry: FSSAILicensee[];
-  onOpenKycModal: () => void;
-  onSubmitGrievance: (dossier: GrievanceDossier) => void;
-  onNavigateToPipeline: () => void;
+  citizen: CitizenUser;
+  onOpenCitizenModal: () => void;
+  onSubmitGrievance: (grievance: Grievance) => void;
+  existingGrievances: Grievance[];
 }
 
 export const GrievanceFilingWizard: React.FC<GrievanceFilingWizardProps> = ({
   citizen,
-  fssaiRegistry,
-  onOpenKycModal,
+  onOpenCitizenModal,
   onSubmitGrievance,
-  onNavigateToPipeline
+  existingGrievances
 }) => {
-  // Wizard step: 1 (Establishment & Type), 2 (Live Evidence & Invoice), 3 (Violation & Voice), 4 (Statutory Review)
-  const [step, setStep] = useState<number>(1);
-  const [grievanceType, setGrievanceType] = useState<GrievanceType>('online_delivery');
+  // Wizard State
+  const [issueType, setIssueType] = useState<IssueType>('online');
+  const [businessName, setBusinessName] = useState('Royal Spice Kitchen & Biryani');
+  const [selectedFSSAI, setSelectedFSSAI] = useState<FSSAIBusinessRecord | null>(MOCK_FSSAI_DATABASE[0]);
+  const [keywordSummary, setKeywordSummary] = useState('');
+  const [detailedDescription, setDetailedDescription] = useState('');
+  
+  // Invoice state (Online mode)
+  const [invoiceUploaded, setInvoiceUploaded] = useState(false);
+  const [invoiceFileName, setInvoiceFileName] = useState('swiggy_order_invoice_88291.pdf');
+  const [invoiceOcrText, setInvoiceOcrText] = useState('Vendor: Royal Spice Kitchen | Inv #SW-88291 | Total: INR 540 | Date: 25 Oct 2026');
+  const [invoiceOcrConfidence, setInvoiceOcrConfidence] = useState<'CLEAR' | 'UNCLEAR_SENT_FOR_REVIEW'>('CLEAR');
+  
+  // Images (Min 2, Max 15)
+  const [images, setImages] = useState<GrievanceImage[]>([]);
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  
+  // Geolocation
+  const [location, setLocation] = useState({
+    latitude: 12.9716,
+    longitude: 77.6412,
+    formattedAddress: 'HSR Layout Sector 2, 27th Main Rd, Bengaluru, Karnataka - 560102',
+    city: 'Bengaluru'
+  });
+  const [isFetchingLocation, setIsFetchingLocation] = useState(false);
+  
+  // Voice Note
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [voiceDuration, setVoiceDuration] = useState(0);
+  const [voiceRecorded, setVoiceRecorded] = useState(false);
+  
+  // Warnings from Business or Officials
+  const [hasFacedWarnings, setHasFacedWarnings] = useState(false);
+  const [warningDetails, setWarningDetails] = useState('');
 
-  // Establishment fields
-  const [fssaiInput, setFssaiInput] = useState<string>('11521034000456');
-  const [matchedFBO, setMatchedFBO] = useState<FSSAILicensee | null>(null);
-  const [establishmentName, setEstablishmentName] = useState<string>('SpiceCraft Cloud Kitchens Pvt Ltd');
-  const [establishmentAddress, setEstablishmentAddress] = useState<string>('Unit 4B, Lower Parel Industrial Estate, Mumbai');
-  const [platformName, setPlatformName] = useState<string>('Zomato');
-  const [orderId, setOrderId] = useState<string>('ZOM-902184-OCT');
+  // Live Jurisdiction Pre-Check
+  const jurisdictionCheck = scanFSSAIJurisdiction(keywordSummary + ' ' + detailedDescription);
 
-  // Evidence photos (requires 2-15)
-  const [capturedImages, setCapturedImages] = useState<CapturedEvidence[]>([]);
-  const [isCameraModalOpen, setIsCameraModalOpen] = useState<boolean>(false);
-  const [currentAnglePrompt, setCurrentAnglePrompt] = useState<string>('Angle 1: Top-down macro focus on foreign matter / food defect');
+  // Business Lookup Handler
+  const handleBusinessSelect = (name: string) => {
+    setBusinessName(name);
+    const found = MOCK_FSSAI_DATABASE.find(b => b.businessName.toLowerCase() === name.toLowerCase()) || {
+      licenseNumber: 'UNREGISTERED-PETTY-FOOD',
+      businessName: name,
+      businessType: 'Unregistered Food Business Operator',
+      address: location.formattedAddress,
+      state: 'Karnataka',
+      pincode: '560102',
+      licenseStatus: 'NOT_FOUND',
+      issueDate: 'N/A',
+      expiryDate: 'N/A',
+      lastLabInspectionDate: 'Never Inspected',
+      labResultSummary: 'No active FSSAI registration found in central database. Operating unlawfully.',
+      hygieneRatingStars: 1,
+      activeWarningsCount: 1
+    };
+    setSelectedFSSAI(found);
+  };
 
-  // Invoice OCR (optional for delivery)
-  const [invoiceImage, setInvoiceImage] = useState<string | null>(null);
-  const [invoiceParsed, setInvoiceParsed] = useState<{
-    orderNumber?: string;
-    billedAmount?: string;
-    restaurantName?: string;
-    parsedDate?: string;
-  } | null>(null);
-  const [isOcrProcessing, setIsOcrProcessing] = useState<boolean>(false);
-
-  // Symptoms & Voice
-  const [selectedKeywords, setSelectedKeywords] = useState<string[]>(['foreign object', 'plastic fragment', 'rancid oil']);
-  const [incidentDescription, setIncidentDescription] = useState<string>(
-    'Received chicken korma order with severe rancid smell and sharp metallic/plastic fragments embedded in gravy.'
-  );
-  const [isRecordingVoice, setIsRecordingVoice] = useState<boolean>(false);
-  const [voiceTranscript, setVoiceTranscript] = useState<string>(
-    'The oil had a bitter smell and I found hard plastic sharp edges inside the meat gravy.'
-  );
-
-  // Wizard validation error
-  const [stepError, setStepError] = useState<string | null>(null);
-
-  // FSSAI FoSCoS Auto-Lookup
-  const handleFssaiLookup = (licenseNum: string) => {
-    setFssaiInput(licenseNum);
-    const clean = licenseNum.trim();
-    const found = fssaiRegistry.find(r => r.licenseNumber === clean);
-    if (found) {
-      setMatchedFBO(found);
-      setEstablishmentName(found.businessName);
-      setEstablishmentAddress(`${found.address}, ${found.district}, ${found.state} - ${found.pincode}`);
+  const handleFetchCurrentLocation = () => {
+    setIsFetchingLocation(true);
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          setLocation({
+            latitude: Number(pos.coords.latitude.toFixed(4)),
+            longitude: Number(pos.coords.longitude.toFixed(4)),
+            formattedAddress: `Lat ${pos.coords.latitude.toFixed(4)}, Long ${pos.coords.longitude.toFixed(4)}, Indiranagar Zone, Bengaluru`,
+            city: 'Bengaluru'
+          });
+          setIsFetchingLocation(false);
+        },
+        () => {
+          setIsFetchingLocation(false);
+        },
+        { timeout: 5000 }
+      );
     } else {
-      setMatchedFBO(null);
+      setIsFetchingLocation(false);
     }
   };
 
-  // Preset angles prompts
-  const angleSequence = [
-    'Angle 1: Top-down macro shot of violation / foreign particle',
-    'Angle 2: 45-degree angle showing dish packaging & seal',
-    'Angle 3: Wider context shot of dining table / delivery bag with timestamp',
-    'Angle 4: Macro close-up of ingredient discoloration or mold'
-  ];
-
-  const handleOpenNextCameraAngle = () => {
-    const nextIdx = capturedImages.length;
-    const prompt = angleSequence[nextIdx] || `Angle ${nextIdx + 1}: Supporting physical perspective`;
-    setCurrentAnglePrompt(prompt);
-    setIsCameraModalOpen(true);
-  };
-
-  const handleAddEvidence = (evd: CapturedEvidence) => {
-    setCapturedImages(prev => [...prev, evd]);
-  };
-
-  const handleRemoveEvidence = (id: string) => {
-    setCapturedImages(prev => prev.filter(img => img.id !== id));
-  };
-
-  // Invoice simulated OCR parser
-  const handleSimulateInvoiceOcr = () => {
-    setIsOcrProcessing(true);
-    setTimeout(() => {
-      setInvoiceImage('https://images.unsplash.com/photo-1554415707-9e4466bfe0c2?w=600&auto=format&fit=crop&q=80');
-      setInvoiceParsed({
-        orderNumber: orderId || 'ZOM-902184-OCT',
-        billedAmount: '₹648.00',
-        restaurantName: establishmentName || 'SpiceCraft Cloud Kitchens',
-        parsedDate: new Date().toLocaleDateString('en-IN')
-      });
-      setIsOcrProcessing(false);
-    }, 1200);
-  };
-
-  // Voice recording toggle
-  const toggleVoiceRecording = () => {
-    if (isRecordingVoice) {
-      setIsRecordingVoice(false);
-    } else {
+  const handleVoiceToggle = () => {
+    if (!isRecordingVoice) {
       setIsRecordingVoice(true);
-      setTimeout(() => {
-        setIsRecordingVoice(false);
-        setVoiceTranscript('I opened the dinner package at 8:30 PM. The gravy was acidic and contained sharp debris.');
-      }, 3000);
+      setVoiceRecorded(false);
+      setVoiceDuration(0);
+      const timer = setInterval(() => {
+        setVoiceDuration(prev => {
+          if (prev >= 15) {
+            clearInterval(timer);
+            setIsRecordingVoice(false);
+            setVoiceRecorded(true);
+            return 15;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } else {
+      setIsRecordingVoice(false);
+      setVoiceRecorded(true);
     }
   };
 
-  const toggleKeyword = (kw: string) => {
-    setSelectedKeywords(prev => 
-      prev.includes(kw) ? prev.filter(k => k !== kw) : [...prev, kw]
-    );
+  const handleAddCapturedImage = (image: GrievanceImage) => {
+    if (images.length >= 15) {
+      alert('Statutory requirement: Maximum 15 photos allowed per grievance under statutory protocol.');
+      return;
+    }
+    setImages(prev => [...prev, image]);
   };
 
-  // Pre-calculated statutory review
-  const isLicenseExpiredOrMissing = matchedFBO ? matchedFBO.status === 'Expired' : !isValidFSSAILicense(fssaiInput);
-  const statutoryPreview = scanStatutoryJurisdiction(
-    incidentDescription, 
-    selectedKeywords, 
-    isLicenseExpiredOrMissing
-  );
-  const calculatedPriority = calculatePriorityLevel(
-    statutoryPreview.severityScore, 
-    statutoryPreview.clusteredIncidentCount, 
-    isLicenseExpiredOrMissing
-  );
-  const estimatedBounty = calculateStatutoryBountyINR(35000, statutoryPreview.severityScore);
-
-  // Validate step navigation
-  const handleNextStep = () => {
-    setStepError(null);
-
-    if (step === 1) {
-      if (!establishmentName.trim()) {
-        setStepError('Please enter or look up the Food Business Operator name.');
-        return;
-      }
-      setStep(2);
-      return;
-    }
-
-    if (step === 2) {
-      if (capturedImages.length < 2) {
-        setStepError('Statutory Minimum: You must capture at least 2 multi-angle live photos with camera.');
-        return;
-      }
-      setStep(3);
-      return;
-    }
-
-    if (step === 3) {
-      if (selectedKeywords.length === 0) {
-        setStepError('Please select at least one statutory symptom / violation keyword.');
-        return;
-      }
-      if (!incidentDescription.trim() || incidentDescription.length < 20) {
-        setStepError('Please provide a descriptive explanation of the food safety violation (minimum 20 characters).');
-        return;
-      }
-      setStep(4);
-      return;
-    }
+  const handleRemoveImage = (id: string) => {
+    setImages(prev => prev.filter(img => img.id !== id));
   };
 
-  const handleFinalSubmit = () => {
-    const trackingNumber = `FSSA-IN-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const dossierHash = generateEvidenceHash('FSSAI_LEDGER', `${trackingNumber}_${citizen.id}`);
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
 
-    const newDossier: GrievanceDossier = {
-      id: `GRV-${Date.now()}`,
-      trackingNumber,
-      type: grievanceType,
-      filingDate: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      citizen: {
-        fullName: citizen.fullName,
-        maskedPhone: citizen.phone.replace(/(\d{3})\d{4}(\d{3})/, '$1****$2'),
-        maskedAadhaar: citizen.aadhaarNumberMasked
+    if (!citizen.isVerified) {
+      onOpenCitizenModal();
+      return;
+    }
+
+    if (images.length < 2) {
+      alert('Statutory requirement: Please capture at least 2 live camera photos from different angles (e.g. Overview & Macro close-up) before submitting.');
+      return;
+    }
+
+    if (issueType === 'online' && !invoiceUploaded) {
+      alert('Online grievances require an order invoice. Please attach the order receipt or invoice.');
+      return;
+    }
+
+    // Hash calculation and duplicate detection
+    const grievanceHash = generateGrievanceHash(businessName, keywordSummary, location.city);
+    const existingDuplicate = existingGrievances.find(g => g.hashCode === grievanceHash && g.status !== 'settled');
+    
+    // Cluster hotspot calculation (how many distinct reports in short window)
+    const clusterCount = existingGrievances.filter(g => g.businessName.toLowerCase() === businessName.toLowerCase()).length + 1;
+
+    // FSSAI license check
+    const fssaiRecord = selectedFSSAI || MOCK_FSSAI_DATABASE[0];
+    const isLicenseExpiredOrMissing = fssaiRecord.licenseStatus === 'EXPIRED' || fssaiRecord.licenseStatus === 'NOT_FOUND' || fssaiRecord.licenseStatus === 'SUSPENDED';
+
+    // Priority computation
+    const calculatedPriority = calculateGrievancePriority({
+      jurisdictionSection: jurisdictionCheck.citedFSSAISection,
+      fssaiLicenseStatus: fssaiRecord.licenseStatus,
+      clusterCount,
+      hasBusinessThreatenedCitizen: hasFacedWarnings,
+      issueType
+    });
+
+    const rewardINR = calculateCitizenReward(calculatedPriority);
+    const assignedOfficer = MOCK_OFFICIALS[0];
+
+    const newGrievance: Grievance = {
+      id: `SIH-GRV-${Date.now().toString().slice(-6)}`,
+      hashCode: grievanceHash,
+      userId: citizen.id,
+      userFullName: `${citizen.firstName} ${citizen.lastName}`,
+      userMobile: citizen.mobile,
+      createdAt: new Date().toISOString(),
+      slaDeadline: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+      issueType,
+      invoiceUrl: issueType === 'online' ? invoiceFileName : undefined,
+      invoiceOcrText: issueType === 'online' ? invoiceOcrText : undefined,
+      invoiceNeedsManualReview: invoiceOcrConfidence === 'UNCLEAR_SENT_FOR_REVIEW',
+      keywordSummary,
+      detailedDescription,
+      voiceDurationSeconds: voiceRecorded ? voiceDuration : undefined,
+      images,
+      location,
+      businessName,
+      fssaiDetails: fssaiRecord,
+      hasFSSAIWarningOrExpired: isLicenseExpiredOrMissing,
+      hasFacedBusinessWarnings: hasFacedWarnings,
+      businessWarningDetails: hasFacedWarnings ? warningDetails : undefined,
+      verificationState: {
+        structuralFilterPassed: true,
+        jurisdictionVerified: jurisdictionCheck.jurisdictionVerified,
+        jurisdictionSectionCited: jurisdictionCheck.citedFSSAISection,
+        jurisdictionVerdictNotes: jurisdictionCheck.verdictDescription,
+        isCustomerServiceOnly: jurisdictionCheck.isCustomerServiceOnly,
+        isDuplicate: !!existingDuplicate,
+        duplicateOfId: existingDuplicate?.id,
+        clusterHotspotCount: clusterCount,
+        assignedOfficerId: assignedOfficer.id,
+        assignedOfficerName: assignedOfficer.name
       },
-      establishment: {
-        name: establishmentName,
-        fssaiLicense: fssaiInput,
-        address: establishmentAddress,
-        platformName: grievanceType === 'online_delivery' ? platformName : undefined,
-        orderId: grievanceType === 'online_delivery' ? orderId : undefined
-      },
-      violationCategory: statutoryPreview.applicableSections.join(' & ') || 'Food Safety Violation',
-      violationKeywords: selectedKeywords,
-      incidentDescription,
-      voiceNoteTranscript: voiceTranscript,
-      evidenceImages: capturedImages,
-      invoiceImageUrl: invoiceImage || undefined,
-      invoiceParsedData: invoiceParsed || undefined,
-      statutoryReview: statutoryPreview,
       priority: calculatedPriority,
-      status: statutoryPreview.isJurisdictionValid ? 'submitted' : 'rejected_non_jurisdiction',
-      rewardDisbursedINR: 0,
-      dossierHash
+      status: !jurisdictionCheck.jurisdictionVerified && jurisdictionCheck.isCustomerServiceOnly
+        ? 'rejected_jurisdiction'
+        : 'forwarded_to_officer',
+      rewardStatus: 'pending_settlement',
+      rewardAmountINR: rewardINR
     };
 
-    onSubmitGrievance(newDossier);
-    onNavigateToPipeline();
-  };
-
-  // Pre-seed samples if user wants quick test
-  const handleLoadDemoViolation = () => {
-    handleFssaiLookup('11521034000456');
-    setGrievanceType('online_delivery');
-    setPlatformName('Zomato');
-    setOrderId('ZOM-902184-OCT');
-    setCapturedImages([
-      {
-        id: 'EVD-DEMO-01',
-        timestamp: new Date().toISOString(),
-        dataUrl: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&auto=format&fit=crop&q=80',
-        angleDescription: 'Angle 1: Top-down macro focus on foreign matter',
-        luminance: 142,
-        blurScore: 42,
-        foodHeuristicConfidence: 94,
-        hash: 'SHA256_EVD_DEMO_01',
-        passedQualityCheck: true
-      },
-      {
-        id: 'EVD-DEMO-02',
-        timestamp: new Date().toISOString(),
-        dataUrl: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=600&auto=format&fit=crop&q=80',
-        angleDescription: 'Angle 2: 45-degree angle showing container seal',
-        luminance: 138,
-        blurScore: 48,
-        foodHeuristicConfidence: 91,
-        hash: 'SHA256_EVD_DEMO_02',
-        passedQualityCheck: true
-      }
-    ]);
-    setSelectedKeywords(['foreign object', 'plastic fragment', 'rancid oil']);
-    setIncidentDescription('Received chicken korma order with severe rancid smell and sharp metallic/plastic fragments embedded in gravy.');
-    setVoiceTranscript('The oil had a bitter smell and I found hard plastic sharp edges inside the meat gravy.');
-    handleSimulateInvoiceOcr();
+    onSubmitGrievance(newGrievance);
   };
 
   return (
-    <div className="max-w-4xl mx-auto py-4 space-y-8">
-      
-      {/* Wizard Header Bar */}
-      <div className="bg-[#36281C] border border-[#F4D9A0]/25 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-2 text-xs font-mono text-[#F4D9A0] uppercase tracking-wider mb-1">
-            <Scale className="w-4 h-4 text-[#C86D24]" />
-            <span>FSSAI Public Grievance Protocol &bull; Step {step} of 4</span>
-          </div>
-          <h2 className="font-editorial text-2xl sm:text-3xl font-bold text-[#FBF6EE]">
-            File Official Food Safety Grievance
-          </h2>
-          <p className="text-xs text-[#CDBFAC] mt-0.5">
-            Complainant: <span className="font-semibold text-[#FBF6EE]">{citizen.fullName}</span> (Age: {citizen.age}) &bull; KYC: {citizen.isKycVerified ? 'Verified' : 'Pending'}
-          </p>
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <button
-            type="button"
-            onClick={handleLoadDemoViolation}
-            className="text-xs font-mono bg-[#1F160E] hover:bg-[#2C2016] text-[#F4D9A0] px-3 py-2 rounded-lg border border-[#F4D9A0]/30 transition-all flex items-center gap-1.5"
-            title="Load realistic verified complaint data for demonstration"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-[#C86D24]" />
-            <span>Load Demo Case</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenKycModal}
-            className="text-xs font-semibold bg-[#2C2016] hover:bg-[#453424] text-[#FBF6EE] px-3 py-2 rounded-lg border border-[#F4D9A0]/30 transition-all"
-          >
-            KYC &amp; Bank Settings
-          </button>
-        </div>
-      </div>
-
-      {/* Step Progress Pills */}
-      <div className="grid grid-cols-4 gap-2 text-xs font-mono">
-        {[
-          { num: 1, label: 'FBO & Type' },
-          { num: 2, label: 'Live Camera (2-15)' },
-          { num: 3, label: 'Symptoms & Voice' },
-          { num: 4, label: 'Statutory Review' }
-        ].map((s) => (
-          <div
-            key={s.num}
-            onClick={() => {
-              if (s.num < step) setStep(s.num);
-            }}
-            className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
-              step === s.num
-                ? 'bg-[#F4D9A0] text-[#2C2016] font-bold border-[#F4D9A0] shadow'
-                : step > s.num
-                ? 'bg-[#36281C] text-[#F4D9A0] border-[#F4D9A0]/40'
-                : 'bg-[#1F160E]/50 text-[#CDBFAC]/50 border-stone-800'
-            }`}
-          >
-            <span className="block text-[10px] uppercase">Step 0{s.num}</span>
-            <span className="font-sans font-medium text-xs truncate">{s.label}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Error alert */}
-      {stepError && (
-        <div className="p-3.5 bg-red-950/70 border border-red-500/40 rounded-xl text-xs text-red-200 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-          <span>{stepError}</span>
-        </div>
-      )}
-
-      {/* STEP 1: Grievance Type & Establishment Lookup */}
-      {step === 1 && (
-        <div className="bg-[#36281C] border border-[#F4D9A0]/25 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl">
-          <div className="border-b border-[#F4D9A0]/15 pb-4">
-            <h3 className="font-editorial text-xl font-bold text-[#FBF6EE]">
-              1. Incident Context &amp; Food Business Operator (FBO)
-            </h3>
-            <p className="text-xs text-[#CDBFAC]">
-              Specify whether this occurred through an online delivery aggregator or physical dine-in/takeaway.
+    <div className="max-w-5xl mx-auto px-4 py-8">
+      {/* 60-30-10 Color Scheme Header (60% Mocha Brown, 30% Champagne Gold, 10% Burnt Amber & White) */}
+      <div className="bg-gradient-to-br from-[#2C2016] via-[#5B4632] to-[#36281C] rounded-2xl p-6 sm:p-8 text-[#FBF6EE] shadow-xl mb-8 border border-[#F4D9A0]/40">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="inline-flex items-center gap-2 bg-[#2C2016] text-[#C86D24] font-mono text-xs px-2.5 py-1 rounded-md uppercase font-bold tracking-wider mb-2 border border-[#C86D24]/50">
+              SIH Problem Statement · Food Tech Pipeline
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[#FBF6EE]">
+              Public to Official Food Safety Grievance Filing
+            </h1>
+            <p className="text-sm text-[#F4D9A0]/85 mt-1 max-w-2xl">
+              Dual-ended statutory complaint portal under the Food Safety and Standards Act 2006. 
+              Submissions undergo live structural image filtering, automated FSSAI registry cross-check, and tamper-proof officer assignment.
             </p>
           </div>
 
-          {/* Grievance Type Toggle */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div
-              onClick={() => setGrievanceType('online_delivery')}
-              className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                grievanceType === 'online_delivery'
-                  ? 'bg-[#2C2016] border-[#F4D9A0] shadow-md ring-1 ring-[#F4D9A0]'
-                  : 'bg-[#1F160E]/60 border-[#F4D9A0]/20 hover:border-[#F4D9A0]/40'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-sm text-[#FBF6EE]">Online Food Delivery</span>
-                {grievanceType === 'online_delivery' && <CheckCircle2 className="w-4 h-4 text-[#F4D9A0]" />}
-              </div>
-              <p className="text-xs text-[#CDBFAC] mt-1">
-                Zomato, Swiggy, direct cloud kitchens, or platform orders with digital receipt.
-              </p>
-            </div>
-
-            <div
-              onClick={() => setGrievanceType('offline_dine_in')}
-              className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                grievanceType === 'offline_dine_in'
-                  ? 'bg-[#2C2016] border-[#F4D9A0] shadow-md ring-1 ring-[#F4D9A0]'
-                  : 'bg-[#1F160E]/60 border-[#F4D9A0]/20 hover:border-[#F4D9A0]/40'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-sm text-[#FBF6EE]">Offline Dine-in / Street Outlet</span>
-                {grievanceType === 'offline_dine_in' && <CheckCircle2 className="w-4 h-4 text-[#F4D9A0]" />}
-              </div>
-              <p className="text-xs text-[#CDBFAC] mt-1">
-                Restaurants, sweet shops, bakeries, school cafeterias, or physical stores.
-              </p>
-            </div>
-          </div>
-
-          {/* FSSAI 14-Digit Auto-Lookup Engine */}
-          <div className="p-4 bg-[#1F160E] rounded-xl border border-[#F4D9A0]/25 space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-mono uppercase tracking-wider text-[#F4D9A0] flex items-center gap-1.5">
-                <Building className="w-4 h-4 text-[#C86D24]" />
-                <span>FSSAI FoSCoS 14-Digit License Verification</span>
-              </label>
-              <span className="text-[10px] text-stone-400 font-mono">National Database Sync</span>
-            </div>
-
-            <div className="flex gap-2">
-              <input
-                type="text"
-                maxLength={14}
-                value={fssaiInput}
-                onChange={(e) => handleFssaiLookup(e.target.value.replace(/\D/g, ''))}
-                placeholder="e.g. 11521034000456 (14 digits)"
-                className="flex-1 bg-[#2C2016] border border-[#F4D9A0]/30 rounded-lg px-3.5 py-2.5 text-sm font-mono text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
-              />
-              <button
-                type="button"
-                onClick={() => handleFssaiLookup(fssaiInput)}
-                className="px-4 py-2 bg-[#36281C] hover:bg-[#453424] text-[#F4D9A0] border border-[#F4D9A0]/40 rounded-lg text-xs font-mono flex items-center gap-1"
-              >
-                <Search className="w-3.5 h-3.5" />
-                <span>Verify</span>
-              </button>
-            </div>
-
-            {/* Matched Registry Card */}
-            {matchedFBO ? (
-              <div className="p-3 bg-[#2C2016] rounded-lg border border-emerald-500/30 text-xs space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-[#FBF6EE]">{matchedFBO.businessName}</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                    matchedFBO.status === 'Active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
-                  }`}>
-                    Status: {matchedFBO.status}
-                  </span>
-                </div>
-                <p className="text-stone-300 text-[11px]">{matchedFBO.address}, {matchedFBO.district}</p>
-                <div className="flex items-center gap-4 text-[10px] font-mono text-[#CDBFAC] pt-1">
-                  <span>Hygiene Rating: {matchedFBO.hygieneRating}/5 &starf;</span>
-                  <span>License Valid Until: {matchedFBO.validUntil}</span>
-                  {matchedFBO.pastViolationsCount > 0 && (
-                    <span className="text-red-400 font-bold">{matchedFBO.pastViolationsCount} Prior Violations</span>
-                  )}
-                </div>
-              </div>
-            ) : (
-              fssaiInput.length === 14 && (
-                <div className="p-2.5 bg-amber-950/40 border border-amber-500/30 rounded-lg text-[11px] text-amber-200">
-                  License not indexed in FoSCoS fast cache. Will be investigated under <strong>Section 31 (Unregistered/Unlicensed Business)</strong> by FSO upon filing.
-                </div>
-              )
-            )}
-          </div>
-
-          {/* Establishment Details */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block text-[#CDBFAC] font-mono mb-1">Establishment / Brand Name</label>
-              <input
-                type="text"
-                value={establishmentName}
-                onChange={(e) => setEstablishmentName(e.target.value)}
-                placeholder="e.g. SpiceCraft Cloud Kitchens"
-                className="w-full bg-[#1F160E] border border-[#F4D9A0]/25 rounded-lg px-3 py-2 text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[#CDBFAC] font-mono mb-1">Full Physical Address</label>
-              <input
-                type="text"
-                value={establishmentAddress}
-                onChange={(e) => setEstablishmentAddress(e.target.value)}
-                placeholder="e.g. Unit 4B, Lower Parel Industrial Estate, Mumbai"
-                className="w-full bg-[#1F160E] border border-[#F4D9A0]/25 rounded-lg px-3 py-2 text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
-              />
-            </div>
-
-            {grievanceType === 'online_delivery' && (
-              <>
-                <div>
-                  <label className="block text-[#CDBFAC] font-mono mb-1">Delivery Platform</label>
-                  <select
-                    value={platformName}
-                    onChange={(e) => setPlatformName(e.target.value)}
-                    className="w-full bg-[#1F160E] border border-[#F4D9A0]/25 rounded-lg px-3 py-2 text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
-                  >
-                    <option value="Zomato">Zomato</option>
-                    <option value="Swiggy">Swiggy</option>
-                    <option value="Direct Website">Direct Restaurant Delivery</option>
-                    <option value="EatSure">EatSure</option>
-                    <option value="Blinkit">Blinkit / Instant Grocery</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[#CDBFAC] font-mono mb-1">Platform Order Reference ID</label>
-                  <input
-                    type="text"
-                    value={orderId}
-                    onChange={(e) => setOrderId(e.target.value)}
-                    placeholder="e.g. ZOM-902184-OCT"
-                    className="w-full bg-[#1F160E] border border-[#F4D9A0]/25 rounded-lg px-3 py-2 text-[#FBF6EE] font-mono focus:outline-none focus:border-[#F4D9A0]"
-                  />
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="pt-4 flex justify-end">
+          <div className="bg-[#2C2016]/95 backdrop-blur-md p-4 rounded-xl border border-[#F4D9A0]/30 text-xs sm:text-right shrink-0">
+            <span className="text-[#FBF6EE]/60 block">Authenticated Citizen:</span>
+            <span className="text-[#FBF6EE] font-bold text-sm block">
+              {citizen.firstName} {citizen.lastName}
+            </span>
+            <span className="text-[#F4D9A0] font-mono block text-[11px]">
+              {citizen.mobile} · Age: 28 (Verified)
+            </span>
             <button
               type="button"
-              onClick={handleNextStep}
-              className="px-6 py-2.5 bg-[#F4D9A0] text-[#2C2016] font-bold text-xs rounded-xl hover:bg-[#ffe1a6] transition-all flex items-center gap-2 shadow"
+              onClick={onOpenCitizenModal}
+              className="mt-2 text-xs font-semibold text-[#2C2016] bg-[#F4D9A0] hover:bg-[#F9E6BD] px-3 py-1 rounded border border-[#F4D9A0] cursor-pointer"
             >
-              <span>Next: Live Camera Evidence</span>
-              <ArrowRight className="w-4 h-4" />
+              Update Credentials
             </button>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* STEP 2: Live Camera Evidence (2 to 15 shots) & Invoice OCR */}
-      {step === 2 && (
-        <div className="bg-[#36281C] border border-[#F4D9A0]/25 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl">
-          <div className="border-b border-[#F4D9A0]/15 pb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-editorial text-xl font-bold text-[#FBF6EE]">
-                  2. Tamper-Proof Live Physical Evidence
-                </h3>
-                <p className="text-xs text-[#CDBFAC]">
-                  Mandatory: Capture between 2 and 15 multi-angle physical shots via live camera. Gallery uploads are disabled.
-                </p>
+      <form onSubmit={handleFormSubmit} className="space-y-8">
+        {/* Step 1: Issue Type (Online vs Offline) */}
+        <section className="bg-[#36281C] border border-[#F4D9A0]/30 rounded-2xl p-6 shadow-md text-[#FBF6EE]">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-extrabold text-[#FBF6EE] flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-[#5B4632] text-[#F4D9A0] text-xs flex items-center justify-center font-bold border border-[#F4D9A0]/40">1</span>
+              Incident Nature & Order Channel
+            </h2>
+            <span className="text-xs text-[#C86D24] font-semibold">Mandatory Step</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <button
+              type="button"
+              onClick={() => {
+                setIssueType('online');
+                setInvoiceUploaded(true);
+              }}
+              className={`p-4 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                issueType === 'online'
+                  ? 'border-[#F4D9A0] bg-[#5B4632]/50'
+                  : 'border-[#F4D9A0]/20 bg-[#2C2016] hover:border-[#F4D9A0]/40'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-sm text-[#FBF6EE]">Online Order Issue</span>
+                {issueType === 'online' && <CheckCircle2 className="w-5 h-5 text-[#F4D9A0]" />}
               </div>
-              <span className="font-mono text-xs px-3 py-1 rounded-full bg-[#1F160E] text-[#F4D9A0] border border-[#F4D9A0]/30">
-                {capturedImages.length} / 15 Captured
-              </span>
+              <p className="text-xs text-[#FBF6EE]/70 mt-1">
+                Zomato, Swiggy, Blinkit, Cloud Kitchen, or online portal food deliveries. Requires order invoice upload.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIssueType('offline')}
+              className={`p-4 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                issueType === 'offline'
+                  ? 'border-[#F4D9A0] bg-[#5B4632]/50'
+                  : 'border-[#F4D9A0]/20 bg-[#2C2016] hover:border-[#F4D9A0]/40'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-sm text-[#FBF6EE]">Offline / Dine-in Issue</span>
+                {issueType === 'offline' && <CheckCircle2 className="w-5 h-5 text-[#F4D9A0]" />}
+              </div>
+              <p className="text-xs text-[#FBF6EE]/70 mt-1">
+                Dine-in restaurant, sweet shop, grocery supermarket, dairy, street vendor, or catering event.
+              </p>
+            </button>
+          </div>
+
+          {/* If Online: Order Invoice Uploader with OCR Tolerance Note */}
+          {issueType === 'online' && (
+            <div className="mt-6 p-4 rounded-xl bg-[#2C2016] border border-[#F4D9A0]/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-[#F4D9A0]" />
+                  <span className="text-sm font-bold text-[#FBF6EE]">Order Invoice Upload (*)</span>
+                </div>
+                <span className="text-[11px] bg-[#5B4632] text-[#F4D9A0] px-2 py-0.5 rounded font-mono border border-[#F4D9A0]/40">
+                  OCR Engine Active
+                </span>
+              </div>
+
+              {/* Informative Callout about Lenient OCR */}
+              <div className="bg-[#36281C] p-3 rounded-lg border border-[#F4D9A0]/20 text-xs text-[#FBF6EE]/80 flex items-start gap-2">
+                <Info className="w-4 h-4 text-[#F4D9A0] shrink-0 mt-0.5" />
+                <span>
+                  <strong>Lenient OCR Policy:</strong> Don't worry if your invoice has wrinkles or imperfect resolution. 
+                  Unclear cases are automatically queued for official human manual verification rather than rejected.
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-[#2C2016] rounded-lg border border-dashed border-[#F4D9A0]/40">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded bg-[#5B4632] text-[#F4D9A0] flex items-center justify-center font-mono text-xs font-bold border border-[#F4D9A0]/30">
+                    PDF
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-[#FBF6EE] block">{invoiceFileName}</span>
+                    <span className="text-[11px] font-mono text-[#F4D9A0]/80 block">{invoiceOcrText}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    value={invoiceOcrConfidence}
+                    onChange={e => setInvoiceOcrConfidence(e.target.value as any)}
+                    className="bg-[#36281C] border border-[#F4D9A0]/30 text-xs text-[#FBF6EE] px-2.5 py-1.5 rounded focus:outline-none"
+                  >
+                    <option value="CLEAR">OCR Status: Sharp / Clear</option>
+                    <option value="UNCLEAR_SENT_FOR_REVIEW">OCR Status: Unclear (Sent for Review)</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setInvoiceUploaded(true)}
+                    className="text-xs bg-[#F4D9A0] hover:bg-[#F9E6BD] text-[#2C2016] font-semibold px-3 py-1.5 rounded cursor-pointer"
+                  >
+                    Replace File
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Step 2: Food Business & FSSAI Registry Auto-Cross Check */}
+        <section className="bg-[#36281C] border border-[#F4D9A0]/30 rounded-2xl p-6 shadow-md text-[#FBF6EE]">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-extrabold text-[#FBF6EE] flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-[#5B4632] text-[#F4D9A0] text-xs flex items-center justify-center font-bold border border-[#F4D9A0]/40">2</span>
+              Target Food Business & FSSAI Registry Details
+            </h2>
+            <span className="text-xs text-[#F4D9A0] font-semibold">Real-Time Registry Query</span>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-[#FBF6EE]/80 mb-1">
+                Food Business Name *
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  required
+                  value={businessName}
+                  onChange={e => handleBusinessSelect(e.target.value)}
+                  placeholder="Enter restaurant or vendor name..."
+                  className="w-full bg-[#2C2016] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-sm text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
+                />
+              </div>
+
+              {/* Quick Select Popular Samples */}
+              <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
+                <span className="text-[#FBF6EE]/60">Quick Test Databases:</span>
+                {MOCK_FSSAI_DATABASE.map((b, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => handleBusinessSelect(b.businessName)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium border cursor-pointer ${
+                      businessName === b.businessName
+                        ? 'bg-[#F4D9A0] text-[#2C2016] border-[#F4D9A0] font-bold'
+                        : 'bg-[#2C2016] text-[#FBF6EE]/70 border-[#F4D9A0]/20 hover:text-white'
+                    }`}
+                  >
+                    {b.businessName} {b.licenseStatus === 'EXPIRED' ? '(⚠️ Expired)' : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* FSSAI Live Record Card */}
+            {selectedFSSAI && (
+              <div className={`p-4 rounded-xl border text-xs ${
+                selectedFSSAI.licenseStatus === 'ACTIVE'
+                  ? 'bg-[#2C2016] border-[#F4D9A0]/40 text-[#FBF6EE]/90'
+                  : 'bg-[#401f18] border-[#C86D24] text-[#FBF6EE]'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#F4D9A0]/20 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-[#F4D9A0]" />
+                    <span className="font-bold text-sm text-[#FBF6EE]">{selectedFSSAI.businessName}</span>
+                    <span className={`font-mono text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
+                      selectedFSSAI.licenseStatus === 'ACTIVE'
+                        ? 'bg-[#5B4632] text-[#F4D9A0] border border-[#F4D9A0]/40'
+                        : 'bg-[#C86D24] text-white'
+                    }`}>
+                      License: {selectedFSSAI.licenseStatus}
+                    </span>
+                  </div>
+
+                  <span className="font-mono text-[#F4D9A0] text-[11px]">
+                    FSSAI Lic #: {selectedFSSAI.licenseNumber}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
+                  <div>
+                    <span className="text-[#FBF6EE]/60 block">Category:</span>
+                    <span className="text-[#FBF6EE] font-medium">{selectedFSSAI.businessType}</span>
+                  </div>
+                  <div>
+                    <span className="text-[#FBF6EE]/60 block">Validity / Renewal:</span>
+                    <span className={`font-mono font-semibold ${
+                      selectedFSSAI.licenseStatus === 'EXPIRED' ? 'text-[#C86D24]' : 'text-[#F4D9A0]'
+                    }`}>
+                      {selectedFSSAI.expiryDate} {selectedFSSAI.licenseStatus === 'EXPIRED' ? '(OVERDUE)' : ''}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#FBF6EE]/60 block">FSSAI Hygiene Rating:</span>
+                    <span className="text-[#F4D9A0] font-bold">
+                      {'★'.repeat(selectedFSSAI.hygieneRatingStars)}{'☆'.repeat(5 - selectedFSSAI.hygieneRatingStars)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-2 pt-2 border-t border-[#F4D9A0]/20 text-[11px]">
+                  <span className="text-[#F4D9A0] font-semibold">Last Laboratory Inspection: </span>
+                  <span>{selectedFSSAI.labResultSummary}</span>
+                </div>
+
+                {selectedFSSAI.licenseStatus === 'EXPIRED' && (
+                  <div className="mt-3 p-2 bg-[#C86D24]/30 border border-[#C86D24] rounded text-[#FBF6EE] text-xs font-semibold flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-[#C86D24] shrink-0" />
+                    <span>
+                      Critical Statutory Trigger: Target food business is operating with an expired FSSAI license. 
+                      This grievance will be escalated directly to Higher Officials with maximum priority!
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Step 3: Location (Maps / GPS coordinates) */}
+        <section className="bg-[#36281C] border border-[#F4D9A0]/30 rounded-2xl p-6 shadow-md text-[#FBF6EE]">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-extrabold text-[#FBF6EE] flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-[#5B4632] text-[#F4D9A0] text-xs flex items-center justify-center font-bold border border-[#F4D9A0]/40">3</span>
+              Incident Physical Location
+            </h2>
+            <button
+              type="button"
+              onClick={handleFetchCurrentLocation}
+              disabled={isFetchingLocation}
+              className="text-xs bg-[#2C2016] border border-[#F4D9A0]/40 text-[#F4D9A0] hover:bg-[#5B4632] px-3 py-1 rounded flex items-center gap-1.5 cursor-pointer"
+            >
+              <MapPin className="w-3.5 h-3.5 text-[#F4D9A0]" />
+              {isFetchingLocation ? 'Fetching GPS...' : 'Fetch Device GPS (Google Maps)'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-[#FBF6EE]/80 mb-1">
+                Resolved Street Address & Landmark
+              </label>
+              <input
+                type="text"
+                required
+                value={location.formattedAddress}
+                onChange={e => setLocation({ ...location, formattedAddress: e.target.value })}
+                className="w-full bg-[#2C2016] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-sm text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#FBF6EE]/80 mb-1">
+                Jurisdiction City / Ward
+              </label>
+              <input
+                type="text"
+                required
+                value={location.city}
+                onChange={e => setLocation({ ...location, city: e.target.value })}
+                className="w-full bg-[#2C2016] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-sm text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
+              />
             </div>
           </div>
 
-          {/* Live Capture Action Area */}
-          <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-[#1F160E] rounded-xl border border-[#F4D9A0]/20">
+          <div className="mt-2 text-[11px] text-[#F4D9A0]/70 font-mono">
+            High Precision Geotag: {location.latitude}° N, {location.longitude}° E · Auto-routes to Designated Officer of South Zone
+          </div>
+        </section>
+
+        {/* Step 4: Multi-Angle Camera Capture (Min 2, Max 15) */}
+        <section className="bg-[#36281C] border border-[#F4D9A0]/30 rounded-2xl p-6 shadow-md text-[#FBF6EE]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
             <div>
-              <span className="block text-xs font-bold text-[#FBF6EE]">Live Camera Viewfinder Gate</span>
-              <span className="text-[11px] text-[#CDBFAC]">
-                Filters luminance (&lt;35 / &gt;240) and Laplacian motion blur in real time.
-              </span>
+              <h2 className="text-lg font-extrabold text-[#FBF6EE] flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-[#5B4632] text-[#F4D9A0] text-xs flex items-center justify-center font-bold border border-[#F4D9A0]/40">4</span>
+                Multi-Angle Photo Evidence (Min 2 · Max 15)
+              </h2>
+              <p className="text-xs text-[#F4D9A0]/80 mt-0.5">
+                Saved gallery uploads blocked. Live camera snapshot only to prevent counterfeit or AI-generated media.
+              </p>
             </div>
 
             <button
               type="button"
-              onClick={handleOpenNextCameraAngle}
-              className="px-5 py-2.5 bg-[#C86D24] text-white font-bold text-xs rounded-xl hover:bg-[#d97c31] transition-all flex items-center gap-2 shadow"
+              onClick={() => setIsCameraModalOpen(true)}
+              className="px-4 py-2 text-xs font-bold text-[#2C2016] bg-[#F4D9A0] hover:bg-[#F9E6BD] rounded-lg transition-colors flex items-center gap-2 shadow-md border border-[#F4D9A0] cursor-pointer"
             >
               <Camera className="w-4 h-4" />
-              <span>Capture Live Photo ({capturedImages.length + 1})</span>
+              Open Live Shutter ({images.length}/15 captured)
             </button>
           </div>
 
-          {/* Captured Photos Grid */}
-          <div className="space-y-2">
-            <label className="text-xs font-mono uppercase tracking-wider text-[#F4D9A0] block">
-              Captured Evidence Registry ({capturedImages.length} Shots)
-            </label>
+          {/* Captured Images Grid */}
+          {images.length === 0 ? (
+            <div className="border-2 border-dashed border-[#F4D9A0]/30 rounded-xl p-8 text-center text-[#FBF6EE]/60 bg-[#2C2016]">
+              <Camera className="w-10 h-10 text-[#F4D9A0] mx-auto mb-2 opacity-60" />
+              <p className="text-sm font-semibold text-[#FBF6EE]">No photos captured yet</p>
+              <p className="text-xs text-[#FBF6EE]/70 max-w-md mx-auto mt-1">
+                Click "Open Live Shutter" to capture at least 2 photos from different angles. 
+                Our structural filter evaluates clarity, blur, brightness, and computer vision food object presence.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {images.map((img, idx) => (
+                <div key={img.id} className="relative rounded-xl overflow-hidden border border-[#F4D9A0]/30 bg-[#2C2016] group">
+                  <div className="aspect-video w-full bg-black overflow-hidden">
+                    <img
+                      src={img.dataUrl}
+                      alt={img.angleLabel}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
 
-            {capturedImages.length === 0 ? (
-              <div className="p-8 border-2 border-dashed border-[#F4D9A0]/20 rounded-xl text-center space-y-2">
-                <Camera className="w-10 h-10 text-stone-500 mx-auto" />
-                <p className="text-xs text-[#CDBFAC]">No photos captured yet.</p>
-                <p className="text-[11px] text-stone-400">
-                  Click the button above to capture at least 2 distinct angles of the defect.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {capturedImages.map((evd, idx) => (
-                  <div 
-                    key={evd.id} 
-                    className="bg-[#2C2016] border border-[#F4D9A0]/25 rounded-xl overflow-hidden shadow relative group"
-                  >
-                    <div className="aspect-video w-full bg-black overflow-hidden relative">
-                      <img 
-                        src={evd.dataUrl} 
-                        alt={evd.angleDescription} 
-                        className="w-full h-full object-cover"
-                      />
+                  <div className="p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-[#FBF6EE] truncate">{img.angleLabel}</span>
                       <button
                         type="button"
-                        onClick={() => handleRemoveEvidence(evd.id)}
-                        className="absolute top-2 right-2 p-1.5 bg-red-600/90 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700"
-                        title="Delete this capture"
+                        onClick={() => handleRemoveImage(img.id)}
+                        className="text-[#C86D24] hover:text-[#e07a2a] p-1 cursor-pointer"
+                        title="Remove photo"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
-                    <div className="p-3 text-[11px] space-y-1">
-                      <div className="font-semibold text-[#FBF6EE] truncate">
-                        {evd.angleDescription}
-                      </div>
-                      <div className="flex justify-between text-[10px] font-mono text-[#F4D9A0]">
-                        <span>Sharpness: {evd.blurScore}</span>
-                        <span>Food Conf: {evd.foodHeuristicConfidence}%</span>
-                      </div>
-                      <div className="text-[9px] font-mono text-stone-400 truncate">
-                        Hash: {evd.hash}
-                      </div>
+                    <div className="mt-2 flex flex-wrap gap-1 text-[10px]">
+                      <span className="bg-[#5B4632] text-[#F4D9A0] px-1.5 py-0.5 rounded font-mono border border-[#F4D9A0]/30">
+                        ✓ Structural PASS
+                      </span>
+                      <span className="bg-[#5B4632] text-[#F4D9A0] px-1.5 py-0.5 rounded font-mono border border-[#F4D9A0]/30">
+                        CV: Food Object
+                      </span>
+                      <span className="text-[#FBF6EE]/50 font-mono">
+                        Angle #{idx + 1}
+                      </span>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Optional Order Invoice OCR Review */}
-          {grievanceType === 'online_delivery' && (
-            <div className="p-4 bg-[#1F160E] rounded-xl border border-[#F4D9A0]/20 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-mono uppercase tracking-wider text-[#F4D9A0] block">
-                    Order Invoice OCR Review (Optional)
-                  </span>
-                  <span className="text-[11px] text-[#CDBFAC]">
-                    Extracts restaurant name and transaction timestamp. Does not auto-reject on imperfect OCR.
-                  </span>
                 </div>
-
-                {!invoiceImage && (
-                  <button
-                    type="button"
-                    onClick={handleSimulateInvoiceOcr}
-                    disabled={isOcrProcessing}
-                    className="px-3.5 py-1.5 bg-[#36281C] hover:bg-[#453424] text-[#FBF6EE] border border-[#F4D9A0]/30 rounded-lg text-xs font-mono flex items-center gap-1.5"
-                  >
-                    <Upload className="w-3.5 h-3.5 text-[#F4D9A0]" />
-                    <span>{isOcrProcessing ? 'Reading Receipt...' : 'Attach Delivery Bill'}</span>
-                  </button>
-                )}
-              </div>
-
-              {invoiceParsed && (
-                <div className="p-3 bg-[#2C2016] rounded-lg border border-[#F4D9A0]/25 text-xs flex flex-col sm:flex-row gap-4 items-center justify-between">
-                  <div className="space-y-0.5">
-                    <span className="text-emerald-400 font-mono text-[10px] block font-bold">
-                      OCR EXTRACTION VERIFIED
-                    </span>
-                    <p className="text-[#FBF6EE] font-semibold">{invoiceParsed.restaurantName}</p>
-                    <p className="text-stone-400 text-[11px]">
-                      Bill: {invoiceParsed.billedAmount} &bull; Order #{invoiceParsed.orderNumber}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setInvoiceImage(null);
-                      setInvoiceParsed(null);
-                    }}
-                    className="text-xs text-stone-400 hover:text-red-400 underline font-mono"
-                  >
-                    Remove
-                  </button>
-                </div>
-              )}
+              ))}
             </div>
           )}
 
-          <div className="pt-4 flex justify-between">
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              className="px-4 py-2 bg-[#2C2016] text-[#CDBFAC] font-medium text-xs rounded-xl hover:text-[#FBF6EE]"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={handleNextStep}
-              className="px-6 py-2.5 bg-[#F4D9A0] text-[#2C2016] font-bold text-xs rounded-xl hover:bg-[#ffe1a6] transition-all flex items-center gap-2 shadow"
-            >
-              <span>Next: Symptoms &amp; Voice Note</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* STEP 3: Symptoms, Keywords & Voice Recording */}
-      {step === 3 && (
-        <div className="bg-[#36281C] border border-[#F4D9A0]/25 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl">
-          <div className="border-b border-[#F4D9A0]/15 pb-4">
-            <h3 className="font-editorial text-xl font-bold text-[#FBF6EE]">
-              3. Statutory Violation Symptoms &amp; Testimony
-            </h3>
-            <p className="text-xs text-[#CDBFAC]">
-              Select all legal violation keywords matching your evidence. FSSAI statutory scanner correlates these tags.
+          {images.length > 0 && images.length < 2 && (
+            <p className="text-[#C86D24] text-xs mt-3 flex items-center gap-1.5 font-semibold">
+              <AlertTriangle className="w-4 h-4" />
+              Please capture at least 1 more photo from a different angle to satisfy the minimum 2-photo statutory requirement.
             </p>
+          )}
+        </section>
+
+        {/* Step 5: Keyword Summary, Detailed Description & Voice Note */}
+        <section className="bg-[#36281C] border border-[#F4D9A0]/30 rounded-2xl p-6 shadow-md text-[#FBF6EE]">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-extrabold text-[#FBF6EE] flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-[#5B4632] text-[#F4D9A0] text-xs flex items-center justify-center font-bold border border-[#F4D9A0]/40">5</span>
+              Grievance Keyword, Description & Voice Note
+            </h2>
+            <span className="text-xs text-[#F4D9A0] font-semibold">FSSAI Legal Scanner</span>
           </div>
 
-          {/* Violation Keyword Chips */}
-          <div className="space-y-2">
-            <label className="text-xs font-mono uppercase tracking-wider text-[#F4D9A0] block">
-              Statutory Symptom Tags (Select all that apply)
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {[
-                'foreign object',
-                'plastic fragment',
-                'glass shards',
-                'cockroach',
-                'dead insect',
-                'rancid oil',
-                'foul smell',
-                'fungus',
-                'moldy bread',
-                'sour curd',
-                'adulterated paneer',
-                'expired batch',
-                'missing fssai logo'
-              ].map((kw) => {
-                const isSelected = selectedKeywords.includes(kw);
-                return (
-                  <button
-                    key={kw}
-                    type="button"
-                    onClick={() => toggleKeyword(kw)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                      isSelected
-                        ? 'bg-[#C86D24] text-white border-[#C86D24] shadow'
-                        : 'bg-[#1F160E] text-[#CDBFAC] border-[#F4D9A0]/20 hover:border-[#F4D9A0]/50'
-                    }`}
-                  >
-                    {kw}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Written Testimony */}
-          <div>
-            <label className="block text-xs font-mono text-[#F4D9A0] mb-1">
-              Detailed Citizen Incident Description
-            </label>
-            <textarea
-              rows={4}
-              value={incidentDescription}
-              onChange={(e) => setIncidentDescription(e.target.value)}
-              placeholder="Describe the condition of food, odor, taste anomaly, packaging condition, and any health symptoms experienced..."
-              className="w-full bg-[#1F160E] border border-[#F4D9A0]/25 rounded-xl p-3.5 text-xs text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
-            />
-          </div>
-
-          {/* Voice Testimony Note */}
-          <div className="p-4 bg-[#1F160E] rounded-xl border border-[#F4D9A0]/20 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Mic className="w-4 h-4 text-[#F4D9A0]" />
-                <span className="text-xs font-mono uppercase text-[#FBF6EE]">
-                  Voice Note Statement (Optional)
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={toggleVoiceRecording}
-                className={`px-3 py-1.5 rounded-lg text-xs font-mono flex items-center gap-1.5 transition-all ${
-                  isRecordingVoice
-                    ? 'bg-red-600 text-white animate-pulse'
-                    : 'bg-[#36281C] text-[#F4D9A0] border border-[#F4D9A0]/30 hover:bg-[#453424]'
-                }`}
-              >
-                {isRecordingVoice ? (
-                  <>
-                    <MicOff className="w-3.5 h-3.5" />
-                    <span>Recording... (Click to Finish)</span>
-                  </>
-                ) : (
-                  <>
-                    <Mic className="w-3.5 h-3.5" />
-                    <span>Record Voice Note</span>
-                  </>
-                )}
-              </button>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-[#FBF6EE]/80 mb-1">
+                Summary Keyword / One-line Sentence (Must match the photo) *
+              </label>
+              <input
+                type="text"
+                required
+                value={keywordSummary}
+                onChange={e => setKeywordSummary(e.target.value)}
+                placeholder="e.g. Dead cockroach found inside gravy container / Altered expiry date on milk packet"
+                className="w-full bg-[#2C2016] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-sm text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
+              />
             </div>
 
-            {voiceTranscript && (
-              <div className="p-3 bg-[#2C2016] rounded-lg border border-[#F4D9A0]/15 text-xs">
-                <span className="text-[10px] font-mono text-[#F4D9A0] uppercase block">
-                  Automated Speech Transcription:
-                </span>
-                <p className="text-stone-300 italic mt-0.5">"{voiceTranscript}"</p>
-              </div>
-            )}
-          </div>
-
-          <div className="pt-4 flex justify-between">
-            <button
-              type="button"
-              onClick={() => setStep(2)}
-              className="px-4 py-2 bg-[#2C2016] text-[#CDBFAC] font-medium text-xs rounded-xl hover:text-[#FBF6EE]"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={handleNextStep}
-              className="px-6 py-2.5 bg-[#F4D9A0] text-[#2C2016] font-bold text-xs rounded-xl hover:bg-[#ffe1a6] transition-all flex items-center gap-2 shadow"
-            >
-              <span>Next: Statutory Legal Review</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* STEP 4: Real-time Statutory Review & Final Submission */}
-      {step === 4 && (
-        <div className="bg-[#36281C] border border-[#F4D9A0]/25 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl">
-          <div className="border-b border-[#F4D9A0]/15 pb-4">
-            <h3 className="font-editorial text-xl font-bold text-[#FBF6EE]">
-              4. FSSA 2006 Statutory Law Pre-Screening
-            </h3>
-            <p className="text-xs text-[#CDBFAC]">
-              Autonomous legal jurisdiction check before logging into the National Enforcement Docket.
-            </p>
-          </div>
-
-          {/* Pre-Screening Result Banner */}
-          <div className={`p-5 rounded-xl border space-y-3 ${
-            statutoryPreview.isJurisdictionValid
-              ? 'bg-[#1F160E] border-emerald-500/40 text-emerald-200'
-              : 'bg-red-950/50 border-red-500/40 text-red-200'
-          }`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Scale className="w-5 h-5 text-[#F4D9A0]" />
-                <span className="font-bold text-sm uppercase tracking-wider font-mono">
-                  {statutoryPreview.isJurisdictionValid
-                    ? 'Admissible under Food Safety & Standards Act, 2006'
-                    : 'Non-Jurisdictional Consumer Issue'}
-                </span>
-              </div>
-              <span className={`px-2.5 py-0.5 rounded text-xs font-mono font-bold ${
-                calculatedPriority === 'Critical'
-                  ? 'bg-rose-600/30 text-rose-300'
-                  : 'bg-amber-600/30 text-amber-200'
-              }`}>
-                Priority: {calculatedPriority}
-              </span>
+            <div>
+              <label className="block text-xs font-semibold text-[#FBF6EE]/80 mb-1">
+                Detailed Description of the Problem Faced *
+              </label>
+              <textarea
+                rows={3}
+                required
+                value={detailedDescription}
+                onChange={e => setDetailedDescription(e.target.value)}
+                placeholder="Provide complete facts: time of consumption, foreign particles noticed, smell or texture defects, symptoms of nausea/food poisoning, lack of hygiene..."
+                className="w-full bg-[#2C2016] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-sm text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
+              />
             </div>
 
-            <p className="text-xs text-[#FBF6EE] leading-relaxed">
-              {statutoryPreview.summaryRationale}
-            </p>
+            {/* Voice Description Component */}
+            <div className="p-4 rounded-xl bg-[#2C2016] border border-[#F4D9A0]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Mic className="w-4 h-4 text-[#F4D9A0]" />
+                  <span className="text-xs font-bold text-[#FBF6EE]">Voice Description Record (Optional)</span>
+                </div>
+                <p className="text-[11px] text-[#FBF6EE]/70 mt-0.5">
+                  Record an official audio statement. Transcribed and attached directly to the case dossier.
+                </p>
+              </div>
 
-            {statutoryPreview.applicableSections.length > 0 && (
-              <div className="flex flex-wrap gap-2 pt-1">
-                {statutoryPreview.applicableSections.map((sec) => (
-                  <span
-                    key={sec}
-                    className="px-2.5 py-1 rounded bg-[#36281C] border border-[#F4D9A0]/30 text-[#F4D9A0] text-xs font-mono"
-                  >
-                    {sec}
+              <div className="flex items-center gap-3">
+                {isRecordingVoice && (
+                  <span className="flex items-center gap-2 text-xs text-[#C86D24] font-mono font-bold animate-pulse">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#C86D24]" />
+                    Recording: {voiceDuration}s / 15s
                   </span>
-                ))}
+                )}
+                {voiceRecorded && (
+                  <span className="text-xs text-[#F4D9A0] font-medium">
+                    ✓ Voice Note Saved ({voiceDuration}s)
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleVoiceToggle}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    isRecordingVoice
+                      ? 'bg-[#C86D24] text-white'
+                      : 'bg-[#F4D9A0] text-[#2C2016] hover:bg-[#F9E6BD]'
+                  }`}
+                >
+                  {isRecordingVoice ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                  {isRecordingVoice ? 'Stop Recording' : voiceRecorded ? 'Re-record Audio' : 'Record Voice Note'}
+                </button>
+              </div>
+            </div>
+
+            {/* Live Legal Jurisdiction Scanner Feedback Box */}
+            {(keywordSummary || detailedDescription) && (
+              <div className={`p-4 rounded-xl border text-xs ${
+                jurisdictionCheck.jurisdictionVerified
+                  ? 'bg-[#2C2016] border-[#F4D9A0]/50 text-[#F4D9A0]'
+                  : 'bg-[#401f18] border-[#C86D24] text-[#FBF6EE]'
+              }`}>
+                <div className="flex items-center justify-between font-bold text-sm">
+                  <span className="flex items-center gap-2">
+                    {jurisdictionCheck.jurisdictionVerified ? (
+                      <CheckCircle2 className="w-4 h-4 text-[#F4D9A0]" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-[#C86D24]" />
+                    )}
+                    FSSA 2006 Statutory Assessment: {jurisdictionCheck.verdictTitle}
+                  </span>
+                  {jurisdictionCheck.citedFSSAISection && (
+                    <span className="font-mono text-xs bg-[#2C2016] px-2 py-0.5 rounded text-[#C86D24] border border-[#C86D24]/50">
+                      {jurisdictionCheck.citedFSSAISection}
+                    </span>
+                  )}
+                </div>
+
+                <p className="mt-1 text-xs opacity-90 text-[#FBF6EE]">
+                  {jurisdictionCheck.verdictDescription}
+                </p>
+
+                {jurisdictionCheck.isCustomerServiceOnly && (
+                  <p className="mt-2 text-[#C86D24] font-semibold text-[11px] bg-[#2C2016] p-2 rounded border border-[#C86D24]/40">
+                    ⚠️ Notice: This appears to be a delivery delay or commercial customer service dispute. 
+                    Pure delivery complaints do not fall under the statutory jurisdiction of Food Safety laws (Section 26-59 of FSSA 2006).
+                  </p>
+                )}
               </div>
             )}
           </div>
+        </section>
 
-          {/* Dossier Summary Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-            <div className="p-4 bg-[#1F160E] rounded-xl border border-[#F4D9A0]/15 space-y-2">
-              <span className="font-mono text-[#F4D9A0] uppercase block text-[10px]">Establishment Under Audit</span>
-              <div className="font-bold text-sm text-[#FBF6EE]">{establishmentName}</div>
-              <p className="text-[#CDBFAC]">{establishmentAddress}</p>
-              <div className="text-stone-400 font-mono text-[11px] pt-1">
-                FSSAI License: {fssaiInput}
-              </div>
-            </div>
-
-            <div className="p-4 bg-[#1F160E] rounded-xl border border-[#F4D9A0]/15 space-y-2">
-              <span className="font-mono text-[#F4D9A0] uppercase block text-[10px]">Citizen Vigilance Payout</span>
-              <div className="font-bold text-sm text-[#F4D9A0]">
-                Up to ₹{estimatedBounty.toLocaleString()} INR Statutory Reward
-              </div>
-              <p className="text-[#CDBFAC]">
-                Credited directly to citizen wallet upon on-site FSO compounding settlement under Section 69.
-              </p>
-              <div className="text-emerald-400 font-mono text-[11px] pt-1">
-                Bank Linked: {citizen.bankAccount?.bankName || 'State Bank of India'}
-              </div>
-            </div>
+        {/* Step 6: Warning & Intimidation Inquiry */}
+        <section className="bg-[#36281C] border border-[#F4D9A0]/30 rounded-2xl p-6 shadow-md text-[#FBF6EE]">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-extrabold text-[#FBF6EE] flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-[#5B4632] text-[#F4D9A0] text-xs flex items-center justify-center font-bold border border-[#F4D9A0]/40">6</span>
+              Warnings & Intimidation Inquiry
+            </h2>
+            <span className="text-xs text-[#C86D24] font-semibold">Whistleblower Protection</span>
           </div>
 
-          <div className="pt-4 flex justify-between">
-            <button
-              type="button"
-              onClick={() => setStep(3)}
-              className="px-4 py-2 bg-[#2C2016] text-[#CDBFAC] font-medium text-xs rounded-xl hover:text-[#FBF6EE]"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={handleFinalSubmit}
-              className="px-8 py-3 bg-gradient-to-r from-[#F4D9A0] to-[#D4B776] text-[#2C2016] font-bold text-sm rounded-xl hover:scale-105 active:scale-95 transition-transform flex items-center gap-2 shadow-lg"
-            >
-              <ShieldCheck className="w-5 h-5 text-[#C86D24]" />
-              <span>Submit to National Enforcement Docket</span>
-            </button>
+          <div className="space-y-3">
+            <p className="text-xs text-[#FBF6EE]/80">
+              Have you faced any warnings, threats, harassment, or bribes from the food business operator or higher officials?
+            </p>
+
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                <input
+                  type="radio"
+                  name="warningsCheck"
+                  checked={hasFacedWarnings === true}
+                  onChange={() => setHasFacedWarnings(true)}
+                  className="accent-[#F4D9A0]"
+                />
+                <span className="text-[#C86D24] font-bold">Yes, I faced threats / intimidation</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer">
+                <input
+                  type="radio"
+                  name="warningsCheck"
+                  checked={hasFacedWarnings === false}
+                  onChange={() => setHasFacedWarnings(false)}
+                  className="accent-[#F4D9A0]"
+                />
+                <span>No warnings or threats</span>
+              </label>
+            </div>
+
+            {hasFacedWarnings && (
+              <div className="mt-3 p-3 bg-[#401f18] border border-[#C86D24] rounded-xl space-y-2">
+                <label className="block text-xs font-bold text-[#C86D24]">
+                  Provide Warning Details (Directly dispatched to State Vigilance Officer) *
+                </label>
+                <textarea
+                  rows={2}
+                  required
+                  value={warningDetails}
+                  onChange={e => setWarningDetails(e.target.value)}
+                  placeholder="Describe who threatened you, phone calls received, or store staff hostility..."
+                  className="w-full bg-[#2C2016] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-xs text-[#FBF6EE] focus:outline-none focus:border-[#C86D24]"
+                />
+                <span className="text-[11px] text-[#FBF6EE]/70 block">
+                  🛡️ Whistleblower protection activated. Contact info sealed and submitted directly to the State Food Safety Commissioner.
+                </span>
+              </div>
+            )}
           </div>
+        </section>
+
+        {/* Submit Grievance Button */}
+        <div className="bg-gradient-to-r from-[#2C2016] via-[#5B4632] to-[#36281C] p-6 rounded-2xl border border-[#F4D9A0]/40 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <div className="text-base font-extrabold text-[#FBF6EE]">
+              Submit Grievance to Dual-Ended Verification Pipeline
+            </div>
+            <p className="text-xs text-[#F4D9A0]/80 mt-0.5">
+              Upon physical raid verification and settlement, citizen receives an immediate cash bounty credited to wallet.
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            className="w-full sm:w-auto px-8 py-3.5 bg-[#F4D9A0] hover:bg-[#F9E6BD] text-[#2C2016] font-extrabold text-sm rounded-xl shadow-2xl transition-all border border-[#F4D9A0] flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+          >
+            <ShieldAlert className="w-5 h-5 text-[#C86D24]" />
+            Submit & Dispatch to Officers
+          </button>
         </div>
-      )}
+      </form>
 
-      {/* Live Camera Viewfinder Modal */}
+      {/* Live Camera Modal */}
       <LiveCameraCaptureModal
         isOpen={isCameraModalOpen}
         onClose={() => setIsCameraModalOpen(false)}
-        onCapture={handleAddEvidence}
-        angleTarget={currentAnglePrompt}
-        existingCount={capturedImages.length}
+        onCaptureImage={handleAddCapturedImage}
+        currentCount={images.length}
       />
-
     </div>
   );
 };

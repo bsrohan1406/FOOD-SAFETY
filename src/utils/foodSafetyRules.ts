@@ -1,297 +1,355 @@
-import { StatutorySection, StatutoryReview, PriorityLevel, CapturedEvidence } from '../types';
+import { PriorityLevel, FSSAIBusinessRecord, IssueType } from '../types';
 
 /**
- * Validates FSSAI 14-digit license number format
+ * Validates if the citizen is at least 18 years old.
  */
-export function isValidFSSAILicense(license: string): boolean {
-  const clean = license.trim().replace(/\s+/g, '');
-  return /^\d{14}$/.test(clean);
-}
-
-/**
- * Validates Indian IFSC bank code format
- */
-export function isValidIFSC(ifsc: string): boolean {
-  const clean = ifsc.trim().toUpperCase();
-  return /^[A-Z]{4}0[A-Z0-9]{6}$/.test(clean);
-}
-
-/**
- * Non-jurisdiction keywords under FSSA 2006 (Civil / Consumer Forum issues, not food safety)
- */
-export const NON_JURISDICTION_TERMS = [
-  'late delivery',
-  'delivery boy',
-  'driver rude',
-  'wrong change',
-  'discount coupon',
-  'overpriced',
-  'price high',
-  'delivery delay',
-  'cold food',
-  'small portion',
-  'packaging torn outside',
-  'spilled gravy in bag',
-  'app refund',
-  'waiter service slow',
-  'music too loud',
-  'ac not working'
-];
-
-/**
- * Statutory Violation keywords mapped to Sections of Food Safety & Standards Act, 2006
- */
-export const STATUTORY_KEYWORD_RULES: {
-  section: StatutorySection;
-  keywords: string[];
-  severity: number;
-  description: string;
-}[] = [
-  {
-    section: 'Section 59', // Unsafe food / adulteration / dangerous contaminants
-    keywords: ['glass shards', 'dead lizard', 'cockroach', 'rat poop', 'poisonous', 'chemical smell', 'maggots', 'larvae', 'metal piece', 'needle', 'severe food poisoning', 'hospitalized', 'vomiting blood'],
-    severity: 10,
-    description: 'Punishment for Unsafe Food (Serious health injury hazard or severe contamination under Section 59)'
-  },
-  {
-    section: 'Section 54', // Extraneous matter / contaminants
-    keywords: ['foreign object', 'hair strand', 'stone pebbles', 'dirt', 'plastic fragment', 'sand particles', 'dead insect', 'rubber band', 'extraneous matter'],
-    severity: 8,
-    description: 'Food containing extraneous matter or non-toxic particulate contaminants under Section 54'
-  },
-  {
-    section: 'Section 51', // Substandard Food
-    keywords: ['foul smell', 'rancid oil', 'rotten meat', 'spoiled gravy', 'sour curd', 'fungus', 'moldy bread', 'decomposed', 'stale odor', 'decayed vegetables'],
-    severity: 7,
-    description: 'Penalty for Substandard Food falling below requisite microbiological or freshness standards under Section 51'
-  },
-  {
-    section: 'Section 52', // Misbranded Food
-    keywords: ['missing fssai logo', 'expired batch', 'tampered date', 'relabelled', 'false organic claim', 'misleading label', 'hidden ingredients', 'fake fssai number'],
-    severity: 6,
-    description: 'Penalty for Misbranded Food or fraudulent statutory labeling under Section 52'
-  },
-  {
-    section: 'Section 50', // Food not of nature or substance demanded
-    keywords: ['synthetic milk', 'adulterated paneer', 'chalk powder', 'colored chili powder', 'artificial food dye', 'substitute ingredient', 'animal fat adulteration', 'starch adulteration'],
-    severity: 8,
-    description: 'Penalty for selling food not of the nature, substance or quality demanded under Section 50'
+export function isCitizenAgeValid(birthDateStr: string, referenceDate: Date = new Date()): { isValid: boolean; age: number; error?: string } {
+  if (!birthDateStr) {
+    return { isValid: false, age: 0, error: 'Date of birth is required.' };
   }
-];
+  const dob = new Date(birthDateStr);
+  if (isNaN(dob.getTime())) {
+    return { isValid: false, age: 0, error: 'Invalid date format.' };
+  }
+  let age = referenceDate.getFullYear() - dob.getFullYear();
+  const m = referenceDate.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && referenceDate.getDate() < dob.getDate())) {
+    age--;
+  }
+  if (age < 18) {
+    return { 
+      isValid: false, 
+      age, 
+      error: `Citizen must be at least 18 years old to file legal food grievances. Current calculated age: ${age} years.` 
+    };
+  }
+  return { isValid: true, age };
+}
 
 /**
- * Evaluates citizen grievance text and selected tags against FSS Act 2006
+ * Structural image validation filter (The first line of defence).
+ * Fast, lightweight check to prevent corrupted, pitch-black, blank or accidental screenshots from entering the pipeline.
  */
-export function scanStatutoryJurisdiction(
-  text: string,
-  selectedKeywords: string[] = [],
-  isLicenseExpiredOrMissing: boolean = false
-): StatutoryReview {
-  const combined = `${text.toLowerCase()} ${selectedKeywords.map(k => k.toLowerCase()).join(' ')}`;
+export interface StructuralFilterResult {
+  passed: boolean;
+  brightness: number; // 0-255
+  blurScore: number; // 0 (sharp) to 100 (unreadable blur)
+  isPitchBlack: boolean;
+  isOverexposed: boolean;
+  isLikelyScreenshot: boolean;
+  hasFoodRelatedObjects: boolean;
+  detectedObjects: string[];
+  rejectionReason?: string;
+}
 
-  // 1. Detect if it's strictly a civil consumer issue rather than food safety
-  const matchesNonJurisdiction = NON_JURISDICTION_TERMS.some(term => combined.includes(term));
-  const hasSafetyTerms = STATUTORY_KEYWORD_RULES.some(rule => 
-    rule.keywords.some(k => combined.includes(k.toLowerCase()))
+export function evaluateStructuralImageFilter(
+  pixelMetrics: { 
+    averageLuminance: number; 
+    laplacianVariance: number; 
+    aspectRatio?: number;
+    detectedKeywords?: string[];
+  }
+): StructuralFilterResult {
+  const brightness = Math.round(pixelMetrics.averageLuminance);
+  // Low variance indicates high blur
+  const blurScore = Math.max(0, Math.min(100, Math.round(100 - (pixelMetrics.laplacianVariance / 5))));
+  
+  const isPitchBlack = brightness < 18;
+  const isOverexposed = brightness > 242;
+  const isTooBlurry = blurScore > 78 || pixelMetrics.laplacianVariance < 60;
+  
+  // Screenshot check: common mobile resolutions or explicit screenshot markers
+  const isLikelyScreenshot = (pixelMetrics.aspectRatio !== undefined) && 
+    (Math.abs(pixelMetrics.aspectRatio - 19.5/9) < 0.05 || Math.abs(pixelMetrics.aspectRatio - 20/9) < 0.05);
+
+  const foodObjectKeywords = [
+    'food', 'dish', 'plate', 'kitchen', 'meal', 'soup', 'meat', 'vegetable', 
+    'bread', 'sauce', 'packet', 'container', 'oil', 'pan', 'glass', 'beverage',
+    'insect', 'mold', 'fungus', 'utensil', 'tray', 'counter', 'refrigerator'
+  ];
+
+  const detectedObjects = pixelMetrics.detectedKeywords || ['food', 'plate', 'kitchen'];
+  const hasFoodRelatedObjects = detectedObjects.some(obj => 
+    foodObjectKeywords.some(keyword => obj.toLowerCase().includes(keyword))
   );
 
-  if (matchesNonJurisdiction && !hasSafetyTerms && !isLicenseExpiredOrMissing) {
+  if (isPitchBlack) {
     return {
-      isJurisdictionValid: false,
-      applicableSections: [],
-      severityScore: 1,
-      clusteredIncidentCount: 1,
-      flaggedKeywords: [],
-      summaryRationale: 'Grievance relates purely to commercial delivery/customer service delay and falls under District Consumer Commission, outside FSSAI Food Safety jurisdiction.',
-      rejectionReason: 'Non-jurisdictional consumer dispute under Section 3(1)(k) of FSS Act 2006.'
+      passed: false,
+      brightness,
+      blurScore,
+      isPitchBlack: true,
+      isOverexposed,
+      isLikelyScreenshot,
+      hasFoodRelatedObjects,
+      detectedObjects,
+      rejectionReason: 'Image rejected: Camera captured pitch-black or obscured lens. Please retake under proper lighting.'
     };
   }
 
-  // 2. Identify all applicable statutory sections
-  const matchedSections: StatutorySection[] = [];
-  const flaggedKeywords: string[] = [];
-  let maxSeverity = 4;
-
-  if (isLicenseExpiredOrMissing) {
-    matchedSections.push('Section 31');
-    maxSeverity = Math.max(maxSeverity, 8);
-    flaggedKeywords.push('unlicensed / expired FSSAI');
-  }
-
-  for (const rule of STATUTORY_KEYWORD_RULES) {
-    for (const kw of rule.keywords) {
-      if (combined.includes(kw.toLowerCase())) {
-        if (!matchedSections.includes(rule.section)) {
-          matchedSections.push(rule.section);
-        }
-        if (!flaggedKeywords.includes(kw)) {
-          flaggedKeywords.push(kw);
-        }
-        if (rule.severity > maxSeverity) {
-          maxSeverity = rule.severity;
-        }
-      }
-    }
-  }
-
-  if (matchedSections.length === 0) {
-    // Default to Section 50/51 broad safety review if user flagged genuine food defect
-    matchedSections.push('Section 50');
-    matchedSections.push('Section 51');
-    maxSeverity = 5;
-  }
-
-  // If fine or compounding may apply
-  if (maxSeverity >= 6) {
-    matchedSections.push('Section 69');
-  }
-
-  return {
-    isJurisdictionValid: true,
-    applicableSections: matchedSections,
-    severityScore: maxSeverity,
-    clusteredIncidentCount: 1,
-    flaggedKeywords,
-    summaryRationale: `Categorized under FSSA 2006 statutory jurisdiction: ${matchedSections.join(', ')}. Severity score: ${maxSeverity}/10.`
-  };
-}
-
-/**
- * Determines pipeline priority based on severity, repeat cluster, and license status
- */
-export function calculatePriorityLevel(
-  severityScore: number,
-  clusterCount: number,
-  isUnlicensed: boolean
-): PriorityLevel {
-  if (isUnlicensed || severityScore >= 8 || clusterCount >= 3) {
-    return 'Critical';
-  }
-  if (severityScore >= 6 || clusterCount >= 2) {
-    return 'Elevated';
-  }
-  return 'Standard';
-}
-
-/**
- * Calculates statutory citizen bounty based on officer compounding fine or standard statutory bracket
- */
-export function calculateStatutoryBountyINR(compoundingFineINR: number = 0, severityScore: number = 5): number {
-  if (compoundingFineINR > 0) {
-    // 10% of compounding fine under Section 69, capped between ₹1,000 and ₹15,000
-    const tenPercent = Math.round(compoundingFineINR * 0.1);
-    return Math.max(1000, Math.min(15000, tenPercent));
-  }
-
-  // Statutory baseline reward tier
-  if (severityScore >= 8) return 5000;
-  if (severityScore >= 6) return 2500;
-  return 1000;
-}
-
-/**
- * Evaluates client-side image canvas data for luminance, blur variance & heuristic quality
- */
-export function analyzeImageStructuralQuality(
-  imgData: ImageData
-): {
-  luminance: number;
-  blurScore: number;
-  foodConfidence: number;
-  passed: boolean;
-  failureReason?: string;
-} {
-  const data = imgData.data;
-  const totalPixels = imgData.width * imgData.height;
-  if (totalPixels === 0) {
-    return { luminance: 0, blurScore: 0, foodConfidence: 0, passed: false, failureReason: 'Empty image' };
-  }
-
-  let totalLuminance = 0;
-  let colorVariation = 0;
-  const step = 4; // Sample every 4th pixel for speed
-  let sampleCount = 0;
-
-  for (let i = 0; i < data.length; i += step * 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    totalLuminance += lum;
-    colorVariation += Math.abs(r - g) + Math.abs(g - b);
-    sampleCount++;
-  }
-
-  const avgLuminance = Math.round(totalLuminance / sampleCount);
-  const avgVariation = colorVariation / sampleCount;
-
-  // Approximate edge gradient / blur estimation
-  let gradientSum = 0;
-  const width = imgData.width;
-  for (let y = 1; y < imgData.height - 1; y += 4) {
-    for (let x = 1; x < width - 1; x += 4) {
-      const idx = (y * width + x) * 4;
-      const rightIdx = (y * width + (x + 1)) * 4;
-      const downIdx = ((y + 1) * width + x) * 4;
-      
-      const diffX = Math.abs(data[idx] - data[rightIdx]);
-      const diffY = Math.abs(data[idx] - data[downIdx]);
-      gradientSum += diffX + diffY;
-    }
-  }
-
-  const blurScore = Math.min(100, Math.round((gradientSum / (sampleCount * 0.5)) * 1.8));
-  // Food heuristic based on natural organic color tone variations (warm amber/yellow/greens vs monochromatic)
-  const foodConfidence = Math.min(98, Math.max(45, Math.round(avgVariation * 1.5 + (avgLuminance > 50 && avgLuminance < 210 ? 25 : 0))));
-
-  if (avgLuminance < 35) {
+  if (isOverexposed) {
     return {
-      luminance: avgLuminance,
-      blurScore,
-      foodConfidence,
       passed: false,
-      failureReason: 'Luminance too low (Pitch black / underexposed). Please shine adequate light.'
+      brightness,
+      blurScore,
+      isPitchBlack,
+      isOverexposed: true,
+      isLikelyScreenshot,
+      hasFoodRelatedObjects,
+      detectedObjects,
+      rejectionReason: 'Image rejected: Severe flash glare or overexposed brightness. Details cannot be verified.'
     };
   }
 
-  if (avgLuminance > 240) {
+  if (isTooBlurry) {
     return {
-      luminance: avgLuminance,
-      blurScore,
-      foodConfidence,
       passed: false,
-      failureReason: 'Luminance too high (Washed out / flash glare). Please avoid harsh direct reflection.'
+      brightness,
+      blurScore,
+      isPitchBlack,
+      isOverexposed,
+      isLikelyScreenshot,
+      hasFoodRelatedObjects,
+      detectedObjects,
+      rejectionReason: 'Image rejected: Photo is excessively blurred. Official inspection requires sharp evidential clarity.'
     };
   }
 
-  if (blurScore < 14) {
+  if (!hasFoodRelatedObjects) {
     return {
-      luminance: avgLuminance,
-      blurScore,
-      foodConfidence,
       passed: false,
-      failureReason: 'Motion blur detected. Hold the camera steady for clear macro focus.'
+      brightness,
+      blurScore,
+      isPitchBlack,
+      isOverexposed,
+      isLikelyScreenshot,
+      hasFoodRelatedObjects: false,
+      detectedObjects,
+      rejectionReason: 'Object detection filter: Image does not contain recognizable food, beverage, packaging, kitchen, or dining artifacts.'
     };
   }
 
   return {
-    luminance: avgLuminance,
+    passed: true,
+    brightness,
     blurScore,
-    foodConfidence,
-    passed: true
+    isPitchBlack: false,
+    isOverexposed: false,
+    isLikelyScreenshot: false,
+    hasFoodRelatedObjects: true,
+    detectedObjects
   };
 }
 
 /**
- * Generates cryptographic-styled mock hash for evidence verification
+ * Food Safety and Standards Act, 2006 Legal Jurisdiction Scanner.
+ * Ref: https://fssai.gov.in/cms/food-safety-and-standards-act-2006.php
+ * Verifies if the complaint is a legitimate food safety statutory offense or merely a customer service dispute.
  */
-export function generateEvidenceHash(prefix: string, seed: string): string {
+export interface JurisdictionEvaluation {
+  jurisdictionVerified: boolean;
+  isCustomerServiceOnly: boolean;
+  citedFSSAISection?: string;
+  verdictTitle: string;
+  verdictDescription: string;
+  suggestedAction: 'FORWARD_TO_OFFICERS' | 'REJECT_REDIRECT_CONSUMER_COURT';
+}
+
+export function scanFSSAIJurisdiction(text: string): JurisdictionEvaluation {
+  const normalized = text.toLowerCase();
+
+  // Pure customer service keywords (Non-statutory food safety matters)
+  const customerServiceTriggers = [
+    'late delivery', 'delayed delivery', 'delivery boy', 'delivery partner was rude',
+    'wrong cold drink flavor', 'cold food', 'cold burger', 'spilled ketchup in bag',
+    'forgot to give extra tissue', 'no plastic spoon', 'portion size is small',
+    'too expensive', 'discount code not applied', 'refund refused by app',
+    'zomato rider took wrong turn', 'swiggy delivery agent arguing', 'rider canceled'
+  ];
+
+  // Statutory offenses under FSSA 2006
+  const statutoryOffenses = [
+    {
+      keywords: ['cockroach', 'dead fly', 'insect', 'worm', 'maggot', 'spider', 'lizard', 'rat', 'rodent', 'hair', 'glass', 'metal wire', 'stapler pin', 'stone', 'foreign particle', 'extraneous'],
+      section: 'Section 54 - Penalty for Food Containing Extraneous Matter',
+      title: 'Extraneous & Contaminant Matter Violation'
+    },
+    {
+      keywords: ['food poisoning', 'vomiting', 'hospitalized', 'diarrhea', 'nausea', 'infection', 'toxic', 'severe stomach cramps', 'poisoned', 'sick after eating'],
+      section: 'Section 59 - Punishment for Unsafe Food causing injury or mortality',
+      title: 'Severe Public Health Endangerment (Unsafe Food)'
+    },
+    {
+      keywords: ['rotten', 'foul smelling', 'decayed', 'stale', 'smelling like acid', 'smells sour', 'curdled milk', 'fungus', 'mold', 'slime', 'spoiled meat', 'green mold', 'fungal growth'],
+      section: 'Section 51 - Penalty for Sub-Standard & Decomposed Food',
+      title: 'Sub-Standard & Decomposed Food Article'
+    },
+    {
+      keywords: ['synthetic milk', 'adulterated', 'chemical color', 'urea', 'detergent', 'chalk in milk', 'adulterated oil', 'brick powder in chilli', 'industrial dye', 'metanil yellow'],
+      section: 'Section 57 - Penalty for Possessing and Using Adulterant',
+      title: 'Chemical Adulteration & Hazardous Food Additives'
+    },
+    {
+      keywords: ['expired', 'expiry date erased', 'best before crossed', 'fake manufacturing date', 're-labeled date', 'tampered sticker', 'unlabeled package'],
+      section: 'Section 52 - Penalty for Misbranded Food & Mandatory Label Tampering',
+      title: 'Misbranding & Tampered Date of Expiry'
+    },
+    {
+      keywords: ['unhygienic kitchen', 'open sewer next to kitchen', 'no hairnets', 'filthy utensils', 'untreated tap water in cooking', 'cockroach infestation in dining', 'maggots in raw meat storage'],
+      section: 'Section 26 & Schedule 4 - General Sanitary and Hygiene Requirements',
+      title: 'Gross Breach of Mandatory Sanitary Standards'
+    },
+    {
+      keywords: ['beef served instead of veg', 'non veg in veg order', 'pork served without notice', 'deceptive food category', 'halal adulteration'],
+      section: 'Section 53 - Penalty for Misleading Representation to Consumer',
+      title: 'Deceptive Representation of Food Nature'
+    }
+  ];
+
+  // Check if statutory offenses match
+  for (const offense of statutoryOffenses) {
+    if (offense.keywords.some(k => normalized.includes(k))) {
+      return {
+        jurisdictionVerified: true,
+        isCustomerServiceOnly: false,
+        citedFSSAISection: offense.section,
+        verdictTitle: offense.title,
+        verdictDescription: `Falls squarely under FSSA 2006 statutory purview: ${offense.section}. Official site raid and seizure warranted.`,
+        suggestedAction: 'FORWARD_TO_OFFICERS'
+      };
+    }
+  }
+
+  // Check if it's purely customer service dispute
+  const isCustService = customerServiceTriggers.some(trigger => normalized.includes(trigger));
+  if (isCustService) {
+    return {
+      jurisdictionVerified: false,
+      isCustomerServiceOnly: true,
+      verdictTitle: 'Non-Jurisdictional Commercial / Delivery Dispute',
+      verdictDescription: 'This grievance pertains to commercial delivery delay or customer service quality rather than public food safety hygiene, adulteration, or contamination under FSSAI 2006. Case routed to Consumer Forum / App Support.',
+      suggestedAction: 'REJECT_REDIRECT_CONSUMER_COURT'
+    };
+  }
+
+  // Default fallback check: If food quality or health is mentioned even broadly
+  if (normalized.includes('ill') || normalized.includes('hygiene') || normalized.includes('smell') || normalized.includes('dirty') || normalized.includes('safety') || normalized.includes('taste strange')) {
+    return {
+      jurisdictionVerified: true,
+      isCustomerServiceOnly: false,
+      citedFSSAISection: 'Section 26 - General Food Safety Responsibility',
+      verdictTitle: 'Suspected Food Quality & Safety Anomaly',
+      verdictDescription: 'Borderline food safety issue verified for physical officer review under general safety standards.',
+      suggestedAction: 'FORWARD_TO_OFFICERS'
+    };
+  }
+
+  // Otherwise rejected
+  return {
+    jurisdictionVerified: false,
+    isCustomerServiceOnly: false,
+    verdictTitle: 'Insufficient Food Safety Grounds',
+    verdictDescription: 'Description does not demonstrate a prima facie violation of the Food Safety and Standards Act 2006. Please provide specific details of contamination, adulteration, or illness.',
+    suggestedAction: 'REJECT_REDIRECT_CONSUMER_COURT'
+  };
+}
+
+/**
+ * Computes a standardized hash code for grievance content (text + business + issue)
+ * to detect concurrent duplicates across higher officials' dashboards.
+ */
+export function generateGrievanceHash(businessName: string, keywordSummary: string, city: string): string {
+  const raw = `${businessName.trim().toLowerCase()}|${keywordSummary.trim().toLowerCase()}|${city.trim().toLowerCase()}`;
   let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = ((hash << 5) - hash) + seed.charCodeAt(i);
-    hash |= 0;
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0; // Convert to 32bit integer
   }
   const hex = Math.abs(hash).toString(16).padStart(8, '0');
-  const rand = Math.random().toString(16).substring(2, 8);
-  return `${prefix}_0x${hex}${rand}`.toUpperCase();
+  return `GRV-HASH-${hex.toUpperCase()}`;
+}
+
+/**
+ * Calculates priority based on:
+ * - Violation severity
+ * - FSSAI license validity (expired or missing = instant escalation!)
+ * - Multiple duplicate reports / Hotspot clusters
+ * - Warnings or threats issued by business
+ */
+export function calculateGrievancePriority(params: {
+  jurisdictionSection?: string;
+  fssaiLicenseStatus: FSSAIBusinessRecord['licenseStatus'];
+  clusterCount: number;
+  hasBusinessThreatenedCitizen: boolean;
+  issueType: IssueType;
+}): PriorityLevel {
+  const { jurisdictionSection, fssaiLicenseStatus, clusterCount, hasBusinessThreatenedCitizen } = params;
+
+  // Rule 1: Operating without active license / expired license is an immediate High or Critical offense
+  if (fssaiLicenseStatus === 'EXPIRED' || fssaiLicenseStatus === 'SUSPENDED' || fssaiLicenseStatus === 'NOT_FOUND') {
+    if (clusterCount >= 2 || hasBusinessThreatenedCitizen) {
+      return 'critical';
+    }
+    return 'high';
+  }
+
+  // Rule 2: Unsafe food / hospitalization / toxic adulteration
+  if (jurisdictionSection?.includes('Section 59') || jurisdictionSection?.includes('Section 57')) {
+    return 'critical';
+  }
+
+  // Rule 3: Extraneous matter / pests / dead insect
+  if (jurisdictionSection?.includes('Section 54')) {
+    if (clusterCount >= 3 || hasBusinessThreatenedCitizen) {
+      return 'critical';
+    }
+    return 'high';
+  }
+
+  // Rule 4: Substandard / hygiene violations
+  if (jurisdictionSection?.includes('Section 51') || jurisdictionSection?.includes('Section 26')) {
+    if (clusterCount >= 3) {
+      return 'high';
+    }
+    return 'medium';
+  }
+
+  // Default
+  return 'low';
+}
+
+/**
+ * Computes citizen reward bounty upon successful physical raid and settlement.
+ */
+export function calculateCitizenReward(priority: PriorityLevel): number {
+  switch (priority) {
+    case 'critical':
+      return 3500;
+    case 'high':
+      return 1500;
+    case 'medium':
+      return 500;
+    case 'low':
+    default:
+      return 250;
+  }
+}
+
+/**
+ * Bank Account and IFSC validation.
+ */
+export function validateBankDetails(accountNumber: string, ifscCode: string): { isValid: boolean; error?: string } {
+  if (!accountNumber || accountNumber.trim().length < 9 || accountNumber.trim().length > 18) {
+    return { isValid: false, error: 'Bank account number must be between 9 and 18 digits.' };
+  }
+  if (!/^\d+$/.test(accountNumber.trim())) {
+    return { isValid: false, error: 'Bank account number must contain only numbers.' };
+  }
+  const ifscClean = ifscCode.trim().toUpperCase();
+  const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+  if (!ifscRegex.test(ifscClean)) {
+    return { isValid: false, error: 'Invalid IFSC format. Expected 4 letters, 0, then 6 alphanumeric characters (e.g. SBIN0001234, HDFC0000456).' };
+  }
+  return { isValid: true };
 }

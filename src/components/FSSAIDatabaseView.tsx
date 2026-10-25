@@ -1,359 +1,146 @@
 import React, { useState } from 'react';
-import { 
-  Building2, 
-  Search, 
-  ShieldCheck, 
-  AlertTriangle, 
-  CheckCircle2, 
-  MapPin, 
-  Calendar, 
-  Plus, 
-  X,
-  FileText
-} from 'lucide-react';
-import { FSSAILicensee } from '../types';
+import { Database, Search, ShieldCheck, AlertTriangle, Calendar, Building2, CheckCircle2 } from 'lucide-react';
+import { MOCK_FSSAI_DATABASE } from '../data/mockDatabase';
+import { FSSAIBusinessRecord } from '../types';
 
-interface FSSAIDatabaseViewProps {
-  registry: FSSAILicensee[];
-  onAddNewLicensee: (licensee: FSSAILicensee) => void;
-}
-
-export const FSSAIDatabaseView: React.FC<FSSAIDatabaseViewProps> = ({
-  registry,
-  onAddNewLicensee
-}) => {
+export const FSSAIDatabaseView: React.FC = () => {
   const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  // New licensee form state
-  const [newLicenseNum, setNewLicenseNum] = useState('');
-  const [newBizName, setNewBizName] = useState('');
-  const [newCategory, setNewCategory] = useState<FSSAILicensee['category']>('Restaurant');
-  const [newAddress, setNewAddress] = useState('');
-  const [newDistrict, setNewDistrict] = useState('');
-  const [newState, setNewState] = useState('Delhi');
-  const [newPincode, setNewPincode] = useState('110001');
-  const [newRating, setNewRating] = useState(4);
-
-  const filtered = registry.filter((fbo) => {
-    const q = search.toLowerCase();
+  const filteredRecords = MOCK_FSSAI_DATABASE.filter(record => {
     const matchesSearch = 
-      fbo.businessName.toLowerCase().includes(q) ||
-      fbo.licenseNumber.includes(q) ||
-      fbo.district.toLowerCase().includes(q) ||
-      fbo.address.toLowerCase().includes(q);
-
-    const matchesCategory = categoryFilter === 'All' || fbo.category === categoryFilter;
-    const matchesStatus = statusFilter === 'All' || fbo.status === statusFilter;
-
-    return matchesSearch && matchesCategory && matchesStatus;
+      record.businessName.toLowerCase().includes(search.toLowerCase()) ||
+      record.licenseNumber.includes(search) ||
+      record.address.toLowerCase().includes(search.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || record.licenseStatus === statusFilter;
+    return matchesSearch && matchesStatus;
   });
 
-  const handleCreateLicensee = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newLicenseNum || newLicenseNum.length !== 14) {
-      alert('FSSAI License must be exactly 14 digits.');
-      return;
-    }
-
-    const created: FSSAILicensee = {
-      licenseNumber: newLicenseNum,
-      businessName: newBizName,
-      category: newCategory,
-      address: newAddress,
-      district: newDistrict,
-      state: newState,
-      pincode: newPincode,
-      validUntil: '2028-12-31',
-      status: 'Active',
-      hygieneRating: newRating,
-      lastInspectionDate: new Date().toISOString().substring(0, 10),
-      registeredOfficer: 'FSO Rajiv Varma (Emp ID: FSSAI-UP-882)',
-      pastViolationsCount: 0
-    };
-
-    onAddNewLicensee(created);
-    setIsAddModalOpen(false);
-  };
-
   return (
-    <div className="space-y-8 py-4">
-      
-      {/* Header Banner */}
-      <div className="bg-[#36281C] border border-[#F4D9A0]/25 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#F4D9A0]/15 pb-4">
+    <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+      {/* 60-30-10 Header Banner (60% Mocha Brown, 30% Champagne Gold, 10% Burnt Amber & White) */}
+      <div className="bg-gradient-to-r from-[#2C2016] via-[#5B4632] to-[#36281C] rounded-2xl p-6 sm:p-8 text-[#FBF6EE] shadow-xl border border-[#F4D9A0]/40">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center space-x-2 text-xs font-mono text-[#F4D9A0] uppercase tracking-wider mb-1">
-              <Building2 className="w-4 h-4 text-[#C86D24]" />
-              <span>Food Safety Compliance System (FoSCoS)</span>
+            <div className="inline-flex items-center gap-2 bg-[#2C2016] text-[#F4D9A0] font-mono text-xs px-2.5 py-0.5 rounded font-bold uppercase mb-2 border border-[#F4D9A0]/30">
+              National FoSCoS Registry Sync
             </div>
-            <h2 className="font-editorial text-2xl sm:text-3xl font-bold text-[#FBF6EE]">
-              National FSSAI License &amp; FBO Operator Registry
-            </h2>
-            <p className="text-xs text-[#CDBFAC]">
-              Centralized repository of verified commercial kitchens, restaurants, food packaging plants &amp; cloud hubs.
+            <h1 className="text-2xl sm:text-3xl font-black text-[#FBF6EE]">
+              FSSAI Food Business Operator (FBO) Registry
+            </h1>
+            <p className="text-xs sm:text-sm text-[#F4D9A0]/80 mt-1 max-w-2xl">
+              Cross-verify any food establishment's 14-digit FSSAI license, expiry dates, hygiene ratings, and statutory laboratory inspection histories.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setIsAddModalOpen(true)}
-            className="px-4 py-2 bg-[#F4D9A0] text-[#2C2016] font-bold text-xs rounded-xl hover:bg-[#ffe1a6] transition-all flex items-center gap-1.5 shadow"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Index New Food Operator</span>
-          </button>
+          <div className="bg-[#2C2016]/95 p-3 rounded-xl border border-[#F4D9A0]/30 text-xs shrink-0 sm:text-right">
+            <span className="text-[#FBF6EE]/60 block">Registry Node:</span>
+            <span className="text-[#FBF6EE] font-mono font-bold block">FoSCoS Central Hub</span>
+            <span className="text-[#F4D9A0] font-mono text-[11px] block">
+              ● Live Synchronized
+            </span>
+          </div>
         </div>
+      </div>
 
-        {/* Filter controls */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="relative">
-            <Search className="w-4 h-4 text-[#CDBFAC] absolute left-3 top-3" />
+      {/* Search and Filters */}
+      <div className="bg-[#36281C] border border-[#F4D9A0]/30 rounded-2xl p-6 text-[#FBF6EE] shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-[#FBF6EE]/50 absolute left-3 top-3" />
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search 14-digit license, brand name, city..."
-              className="w-full pl-9 pr-3 py-2 bg-[#1F160E] border border-[#F4D9A0]/25 rounded-xl text-xs text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search by Food Business Name, 14-digit License No, or Location..."
+              className="w-full bg-[#2C2016] border border-[#F4D9A0]/30 rounded-lg pl-9 pr-4 py-2.5 text-xs sm:text-sm text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
             />
           </div>
 
-          <div>
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="w-full px-3 py-2 bg-[#1F160E] border border-[#F4D9A0]/25 rounded-xl text-xs text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
-            >
-              <option value="All">All Categories</option>
-              <option value="Restaurant">Restaurant</option>
-              <option value="Cloud Kitchen">Cloud Kitchen</option>
-              <option value="Sweet Shop">Sweet Shop</option>
-              <option value="Dairy">Dairy</option>
-              <option value="Baker">Baker</option>
-            </select>
-          </div>
-
-          <div>
+          <div className="flex items-center gap-2">
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-3 py-2 bg-[#1F160E] border border-[#F4D9A0]/25 rounded-xl text-xs text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0]"
+              onChange={e => setStatusFilter(e.target.value)}
+              className="bg-[#2C2016] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-xs text-[#FBF6EE] focus:outline-none focus:border-[#F4D9A0] cursor-pointer"
             >
-              <option value="All">All Statuses</option>
-              <option value="Active">Active Licenses</option>
-              <option value="Expired">Expired</option>
-              <option value="Under Investigation">Under Investigation</option>
+              <option value="all">All License Statuses</option>
+              <option value="ACTIVE">Active Licenses Only</option>
+              <option value="EXPIRED">Expired / Overdue Only</option>
+              <option value="NOT_FOUND">Unregistered / Not Found</option>
             </select>
           </div>
         </div>
-      </div>
 
-      {/* Registry Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {filtered.map((fbo) => {
-          const isExpired = fbo.status === 'Expired';
-          return (
+        {/* Records Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+          {filteredRecords.map(record => (
             <div
-              key={fbo.licenseNumber}
-              className={`bg-[#36281C] border rounded-2xl p-6 space-y-4 shadow-lg transition-all hover:border-[#F4D9A0]/60 ${
-                isExpired ? 'border-red-500/40 bg-red-950/10' : 'border-[#F4D9A0]/20'
+              key={record.licenseNumber}
+              className={`rounded-xl p-5 border text-xs space-y-3 transition-all ${
+                record.licenseStatus === 'ACTIVE'
+                  ? 'bg-[#2C2016] border-[#F4D9A0]/30 hover:border-[#F4D9A0]'
+                  : 'bg-[#401f18] border-[#C86D24] hover:border-[#e07a2a]'
               }`}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#1F160E] text-[#F4D9A0] border border-[#F4D9A0]/20">
-                    {fbo.category}
-                  </span>
-                  <h3 className="font-editorial text-xl font-bold text-[#FBF6EE]">
-                    {fbo.businessName}
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-[#FBF6EE] flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-[#F4D9A0] shrink-0" />
+                    {record.businessName}
                   </h3>
-                  <div className="flex items-center gap-1.5 text-xs text-[#CDBFAC]">
-                    <MapPin className="w-3.5 h-3.5 text-[#C86D24]" />
-                    <span>{fbo.address}, {fbo.district}, {fbo.state} - {fbo.pincode}</span>
-                  </div>
+                  <span className="text-[11px] text-[#FBF6EE]/60 block mt-0.5">
+                    {record.businessType}
+                  </span>
                 </div>
 
-                <span className={`px-2.5 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${
-                  fbo.status === 'Active'
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                    : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                <span className={`font-mono text-[10px] px-2 py-0.5 rounded font-bold uppercase ${
+                  record.licenseStatus === 'ACTIVE'
+                    ? 'bg-[#5B4632] text-[#F4D9A0] border border-[#F4D9A0]/40'
+                    : 'bg-[#C86D24] text-white border border-[#C86D24]'
                 }`}>
-                  {fbo.status}
+                  {record.licenseStatus}
                 </span>
               </div>
 
-              {/* License Details & Hygiene */}
-              <div className="pt-2 border-t border-[#F4D9A0]/15 grid grid-cols-2 gap-2 text-xs font-mono">
+              <div className="grid grid-cols-2 gap-2 text-[11px] bg-[#36281C] p-2.5 rounded-lg border border-[#F4D9A0]/20">
                 <div>
-                  <span className="text-[10px] text-stone-400 block">FSSAI 14-Digit Number</span>
-                  <span className="font-bold text-[#F4D9A0]">{fbo.licenseNumber}</span>
+                  <span className="text-[#FBF6EE]/60 block">14-Digit FSSAI Lic #:</span>
+                  <span className="text-[#FBF6EE] font-mono font-semibold">{record.licenseNumber}</span>
                 </div>
+
                 <div>
-                  <span className="text-[10px] text-stone-400 block">Valid Until</span>
-                  <span className="text-[#FBF6EE]">{fbo.validUntil}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-stone-400 block">Hygiene Rating</span>
-                  <span className="text-amber-300 font-bold">
-                    {'★'.repeat(fbo.hygieneRating)}{'☆'.repeat(5 - fbo.hygieneRating)} ({fbo.hygieneRating}/5)
+                  <span className="text-[#FBF6EE]/60 block">Renewal / Expiry:</span>
+                  <span className={`font-mono font-semibold ${
+                    record.licenseStatus === 'EXPIRED' ? 'text-[#C86D24]' : 'text-[#F4D9A0]'
+                  }`}>
+                    {record.expiryDate}
                   </span>
                 </div>
-                <div>
-                  <span className="text-[10px] text-stone-400 block">Past Violations</span>
-                  <span className={fbo.pastViolationsCount > 0 ? 'text-red-400 font-bold' : 'text-emerald-400'}>
-                    {fbo.pastViolationsCount} Incidents Logged
-                  </span>
+
+                <div className="col-span-2">
+                  <span className="text-[#FBF6EE]/60 block">Address:</span>
+                  <span className="text-[#FBF6EE]/80">{record.address}, {record.state} - {record.pincode}</span>
                 </div>
               </div>
 
-              <div className="text-[11px] text-stone-400 border-t border-[#F4D9A0]/10 pt-2 flex justify-between items-center">
-                <span>Assigned: {fbo.registeredOfficer}</span>
-                <span>Last Inspected: {fbo.lastInspectionDate}</span>
+              <div>
+                <span className="text-[#FBF6EE]/60 block">Hygiene Rating:</span>
+                <span className="text-[#F4D9A0] font-bold text-sm">
+                  {'★'.repeat(record.hygieneRatingStars)}{'☆'.repeat(5 - record.hygieneRatingStars)}
+                </span>
+              </div>
+
+              <div className="border-t border-[#F4D9A0]/20 pt-2 text-[11px]">
+                <span className="text-[#F4D9A0] font-bold block">Laboratory Inspection Summary:</span>
+                <p className="text-[#FBF6EE]/80 mt-0.5">{record.labResultSummary}</p>
+                <span className="text-[#FBF6EE]/50 text-[10px] block mt-1">
+                  Last Inspected: {record.lastLabInspectionDate}
+                </span>
               </div>
             </div>
-          );
-        })}
-      </div>
-
-      {/* Add Licensee Modal */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#2C2016] border border-[#F4D9A0]/40 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
-            <div className="bg-[#36281C] px-6 py-4 border-b border-[#F4D9A0]/20 flex items-center justify-between">
-              <h3 className="font-editorial text-lg font-bold text-[#FBF6EE]">
-                Index Food Business Operator
-              </h3>
-              <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="p-1 rounded text-[#CDBFAC] hover:text-[#FBF6EE]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateLicensee} className="p-6 space-y-4 text-xs">
-              <div>
-                <label className="block font-mono text-[#F4D9A0] mb-1">14-Digit FSSAI License Number</label>
-                <input
-                  type="text"
-                  maxLength={14}
-                  required
-                  value={newLicenseNum}
-                  onChange={(e) => setNewLicenseNum(e.target.value.replace(/\D/g, ''))}
-                  placeholder="e.g. 10019011000999"
-                  className="w-full bg-[#1F160E] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-[#FBF6EE] font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block font-mono text-[#F4D9A0] mb-1">Business Operator / Trade Name</label>
-                <input
-                  type="text"
-                  required
-                  value={newBizName}
-                  onChange={(e) => setNewBizName(e.target.value)}
-                  placeholder="e.g. Royal Bengal Sweets"
-                  className="w-full bg-[#1F160E] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-[#FBF6EE]"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-mono text-[#F4D9A0] mb-1">Category</label>
-                  <select
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value as any)}
-                    className="w-full bg-[#1F160E] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-[#FBF6EE]"
-                  >
-                    <option value="Restaurant">Restaurant</option>
-                    <option value="Cloud Kitchen">Cloud Kitchen</option>
-                    <option value="Sweet Shop">Sweet Shop</option>
-                    <option value="Dairy">Dairy</option>
-                    <option value="Baker">Baker</option>
-                    <option value="Packaged Food">Packaged Food</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-mono text-[#F4D9A0] mb-1">Hygiene Rating (1-5)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="5"
-                    value={newRating}
-                    onChange={(e) => setNewRating(Number(e.target.value))}
-                    className="w-full bg-[#1F160E] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-[#FBF6EE]"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-mono text-[#F4D9A0] mb-1">Premise Address</label>
-                <input
-                  type="text"
-                  required
-                  value={newAddress}
-                  onChange={(e) => setNewAddress(e.target.value)}
-                  placeholder="Shop number, road, landmark"
-                  className="w-full bg-[#1F160E] border border-[#F4D9A0]/30 rounded-lg px-3 py-2 text-[#FBF6EE]"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block font-mono text-[#F4D9A0] mb-1">District</label>
-                  <input
-                    type="text"
-                    required
-                    value={newDistrict}
-                    onChange={(e) => setNewDistrict(e.target.value)}
-                    className="w-full bg-[#1F160E] border border-[#F4D9A0]/30 rounded-lg px-2.5 py-1.5 text-[#FBF6EE]"
-                  />
-                </div>
-                <div>
-                  <label className="block font-mono text-[#F4D9A0] mb-1">State</label>
-                  <input
-                    type="text"
-                    required
-                    value={newState}
-                    onChange={(e) => setNewState(e.target.value)}
-                    className="w-full bg-[#1F160E] border border-[#F4D9A0]/30 rounded-lg px-2.5 py-1.5 text-[#FBF6EE]"
-                  />
-                </div>
-                <div>
-                  <label className="block font-mono text-[#F4D9A0] mb-1">Pincode</label>
-                  <input
-                    type="text"
-                    required
-                    value={newPincode}
-                    onChange={(e) => setNewPincode(e.target.value)}
-                    className="w-full bg-[#1F160E] border border-[#F4D9A0]/30 rounded-lg px-2.5 py-1.5 text-[#FBF6EE]"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3 flex justify-end space-x-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 bg-[#36281C] text-[#CDBFAC] rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2 bg-[#F4D9A0] text-[#2C2016] font-bold rounded-lg hover:bg-[#ffe1a6]"
-                >
-                  Register in FoSCoS
-                </button>
-              </div>
-            </form>
-          </div>
+          ))}
         </div>
-      )}
-
+      </div>
     </div>
   );
 };

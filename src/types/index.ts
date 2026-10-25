@@ -1,147 +1,161 @@
-export type GrievanceType = 'online_delivery' | 'offline_dine_in';
+export type IssueType = 'online' | 'offline';
+
+export type PriorityLevel = 'low' | 'medium' | 'high' | 'critical';
 
 export type GrievanceStatus = 
-  | 'submitted'
-  | 'ai_cv_verified'
-  | 'statutory_screened'
-  | 'officer_assigned'
-  | 'inspection_in_progress'
-  | 'action_enforced'
-  | 'reward_disbursed'
-  | 'rejected_non_jurisdiction'
-  | 'rejected_quality_failure';
+  | 'draft'
+  | 'under_verification'
+  | 'rejected_jurisdiction'
+  | 'rejected_image_quality'
+  | 'forwarded_to_officer'
+  | 'officer_investigating'
+  | 'proof_submitted_pending_audit'
+  | 'escalated_to_state_authority'
+  | 'settled';
 
-export type StatutorySection = 
-  | 'Section 31' // Unlicensed / Unregistered Food Business
-  | 'Section 50' // Deficient quality / Food not of nature demanded
-  | 'Section 51' // Substandard Food
-  | 'Section 52' // Misbranded Food
-  | 'Section 54' // Extraneous matter / Contaminants
-  | 'Section 59' // Unsafe Food / Severe Adulteration
-  | 'Section 69'; // Compounding of offences
+export interface CitizenUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  mobile: string;
+  dateOfBirth: string; // YYYY-MM-DD
+  permanentAddress: string;
+  temporaryAddress: string;
+  isVerified: boolean;
+  walletBalanceINR: number;
+}
 
-export type PriorityLevel = 'Standard' | 'Elevated' | 'Critical';
-
-export interface FSSAILicensee {
+export interface FSSAIBusinessRecord {
   licenseNumber: string;
   businessName: string;
-  category: 'Restaurant' | 'Cloud Kitchen' | 'Sweet Shop' | 'Dairy' | 'Baker' | 'Street Vendor' | 'Packaged Food';
+  businessType: string;
   address: string;
-  district: string;
   state: string;
   pincode: string;
-  validUntil: string;
-  status: 'Active' | 'Expired' | 'Suspended' | 'Under Investigation';
-  hygieneRating: number; // 1 to 5
-  lastInspectionDate: string;
-  registeredOfficer: string;
-  pastViolationsCount: number;
+  licenseStatus: 'ACTIVE' | 'EXPIRED' | 'SUSPENDED' | 'NOT_FOUND';
+  issueDate: string;
+  expiryDate: string;
+  lastLabInspectionDate: string;
+  labResultSummary: string;
+  hygieneRatingStars: number; // 1-5
+  activeWarningsCount: number;
 }
 
-export interface CapturedEvidence {
+export interface GrievanceImage {
   id: string;
-  timestamp: string;
   dataUrl: string;
-  angleDescription: string;
-  luminance: number; // 0 - 255
-  blurScore: number; // Variance measure
-  foodHeuristicConfidence: number; // 0 - 100%
-  hash: string;
-  passedQualityCheck: boolean;
-  qualityFailureReason?: string;
-}
-
-export interface CitizenProfile {
-  id: string;
-  fullName: string;
-  age: number;
-  aadhaarNumberMasked: string;
-  phone: string;
-  email: string;
-  isKycVerified: boolean;
-  walletBalanceINR: number;
-  bankAccount?: {
-    accountNumberMasked: string;
-    ifsc: string;
-    bankName: string;
+  angleLabel: string; // e.g. "Front Angle", "Close-up Defect", "Kitchen/Packaging", "Batch Code/Plate"
+  timestamp: number;
+  source: 'live_camera';
+  structuralMetrics: {
+    brightness: number; // 0 - 255
+    blurScore: number; // 0 (sharp) to 100 (heavily blurred)
+    isPitchBlack: boolean;
+    isOverexposed: boolean;
+    isLikelyScreenshot: boolean;
+    hasFoodRelatedObjects: boolean;
+    detectedObjects: string[];
+    passed: boolean;
+    rejectionReason?: string;
   };
 }
 
-export interface StatutoryReview {
-  isJurisdictionValid: boolean;
-  applicableSections: StatutorySection[];
-  severityScore: number; // 1 to 10
-  clusterId?: string;
-  clusteredIncidentCount: number;
-  summaryRationale: string;
-  flaggedKeywords: string[];
-  rejectionReason?: string;
-}
-
-export interface OfficerActionLog {
+export interface OfficialProof {
   officerId: string;
   officerName: string;
   designation: string;
-  station: string;
-  inspectionTimestamp: string;
-  onSiteFindings: string;
-  actionTaken: 'Notice Issued' | 'Sample Seized for Lab' | 'Establishment Sealed' | 'Compounding Fine' | 'Warning';
-  compoundingFineINR: number;
-  penaltyNoticeNumber?: string;
-  evidencePhotoUrls: string[];
-  sampleSealId?: string;
-  secondaryAuditorSignOff?: {
-    auditorName: string;
-    auditorDesignation: string;
-    approvedAt: string;
-    remarks: string;
-  };
+  visitTimestamp: string;
+  proofImages: string[];
+  findingsNotes: string;
+  actionTaken: 'seized_samples' | 'issued_improvement_notice' | 'compounded_fine' | 'sealed_premises' | 'clean_bill_of_health';
+  fineAmountINR?: number;
+  sampleBatchCodes?: string[];
+  independentAuditorApproved: boolean;
+  auditorRemarks?: string;
+  citizenAcknowledged?: boolean;
 }
 
-export interface GrievanceDossier {
+export interface Grievance {
   id: string;
-  trackingNumber: string;
-  type: GrievanceType;
-  filingDate: string;
-  citizen: {
-    fullName: string;
-    maskedPhone: string;
-    maskedAadhaar: string;
+  hashCode: string;
+  userId: string;
+  userFullName: string;
+  userMobile: string;
+  createdAt: string;
+  slaDeadline: string; // ISO string
+  issueType: IssueType;
+  invoiceUrl?: string;
+  invoiceOcrText?: string;
+  invoiceNeedsManualReview?: boolean;
+  
+  keywordSummary: string;
+  detailedDescription: string;
+  voiceNoteUrl?: string;
+  voiceDurationSeconds?: number;
+  
+  images: GrievanceImage[];
+  
+  // Location
+  location: {
+    latitude: number;
+    longitude: number;
+    formattedAddress: string;
+    city: string;
+    landmark?: string;
   };
-  establishment: {
-    name: string;
-    fssaiLicense: string;
-    address: string;
-    platformName?: string; // e.g., Zomato, Swiggy, Direct
-    orderId?: string;
+  
+  // Food Business Information
+  businessName: string;
+  fssaiDetails: FSSAIBusinessRecord;
+  hasFSSAIWarningOrExpired: boolean;
+  
+  // Intimidation check
+  hasFacedBusinessWarnings: boolean;
+  businessWarningDetails?: string;
+  
+  // Dual-Ended Verification Engine Output
+  verificationState: {
+    structuralFilterPassed: boolean;
+    structuralFilterReason?: string;
+    jurisdictionVerified: boolean;
+    jurisdictionSectionCited?: string;
+    jurisdictionVerdictNotes: string;
+    isCustomerServiceOnly: boolean;
+    isDuplicate: boolean;
+    duplicateOfId?: string;
+    clusterHotspotCount: number;
+    assignedOfficerId: string;
+    assignedOfficerName: string;
   };
-  violationCategory: string;
-  violationKeywords: string[];
-  incidentDescription: string;
-  voiceNoteTranscript?: string;
-  evidenceImages: CapturedEvidence[];
-  invoiceImageUrl?: string;
-  invoiceParsedData?: {
-    orderNumber?: string;
-    billedAmount?: string;
-    restaurantName?: string;
-    parsedDate?: string;
-  };
-  statutoryReview: StatutoryReview;
+  
   priority: PriorityLevel;
   status: GrievanceStatus;
-  officerAction?: OfficerActionLog;
-  rewardDisbursedINR: number;
-  dossierHash: string;
+  
+  // Resolution & Proofs
+  officialResolution?: OfficialProof;
+  
+  // Reward & Wallet
+  rewardStatus: 'uneligible' | 'pending_settlement' | 'credited';
+  rewardAmountINR: number;
+}
+
+export interface BankAccountDetails {
+  accountNumber: string;
+  confirmAccountNumber: string;
+  ifscCode: string;
+  bankName: string;
+  accountHolderName: string;
+  upiId?: string;
 }
 
 export interface WalletTransaction {
   id: string;
+  grievanceId?: string;
   timestamp: string;
-  type: 'credit_bounty' | 'withdrawal_bank';
+  type: 'CREDIT_REWARD' | 'DEBIT_WITHDRAWAL';
   amountINR: number;
-  dossierTrackingNumber?: string;
   description: string;
-  status: 'Completed' | 'Processing' | 'Pending';
-  referenceId: string;
+  referenceNumber: string;
+  status: 'COMPLETED' | 'PROCESSING' | 'FAILED';
 }
