@@ -1,0 +1,6 @@
+{
+  "name": "Public to Official Verification Pipeline",
+  "description": "A controlled public to official food safety pipeline with dual-ended citizen & officer verification, automated FSSAI cross-check, CV image filters, and citizen reward wallet.",
+  "requestFramePermissions": ["geolocation", "camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
