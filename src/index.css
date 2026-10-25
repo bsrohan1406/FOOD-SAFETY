@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-primary: #2C2016;
+    --bg-surface: #36281C;
+    --bg-card: #453424;
+    --gold-accent: #F4D9A0;
+    --gold-muted: #D4B776;
+    --amber-brand: #C86D24;
+    --text-primary: #FBF6EE;
+    --text-muted: #CDBFAC;
+    --border-gold: rgba(244, 217, 160, 0.2);
+  }
+
+  body {
+    background-color: #2C2016;
+    color: #FBF6EE;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  h1, h2, h3, .font-editorial {
+    font-family: 'Playfair Display', 'Cormorant Garamond', Georgia, serif;
+  }
+
+  .font-mono-telemetry {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Custom scrollbars matching the luxury mocha and gold theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #2C2016;
+}
+::-webkit-scrollbar-thumb {
+  background: #5B4632;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #F4D9A0;
+}
