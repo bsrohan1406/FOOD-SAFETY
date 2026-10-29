@@ -1,0 +1,106 @@
+
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashhead">
+    <div>
+        <p class="eyebrow">{{ current_user.role|upper }} WORKSPACE</p>
+        <h1>Hello, {{ current_user.name }}</h1>
+        <p>Signed in as {{ current_user.role }}.</p>
+    </div>
+
+    {% if current_user.role == 'citizen' %}
+        <a class="btn" href="{{ url_for('grievances.new_grievance') }}">
+            + New grievance
+        </a>
+    {% endif %}
+</div>
+
+<section class="wallet">
+    <span>Demo wallet ledger balance</span>
+    <strong>₹{{ "%.2f"|format(balance/100) }}</strong>
+    <small>Not cash; no withdrawal or payment processing is enabled.</small>
+</section>
+
+<section class="list">
+    {% for g in grievances %}
+        <article class="case">
+            <div class="casehead">
+                <div>
+                    <small>{{ g.public_id }}</small>
+                    <h2>{{ g.business_name }}</h2>
+                </div>
+                <span class="pill {{ g.priority|lower }}">{{ g.priority }}</span>
+            </div>
+
+            <p>{{ g.keyword }} — {{ g.description }}</p>
+
+            <div class="meta">
+                <span>Status: <b>{{ g.status }}</b></span>
+                <span>Created: {{ g.created_at.strftime('%Y-%m-%d %H:%M') if g.created_at else '' }}</span>
+                <span>Reporter: {{ g.citizen.name if g.citizen else '—' }}</span>
+            </div>
+
+            <div class="evidence-links">
+                {% for ev in g.evidence %}
+                    <a href="{{ url_for('grievances.evidence_file', evidence_id=ev.id) }}">
+                        Download {{ ev.evidence_type|lower|replace('_',' ') }} ↗
+                    </a>
+                {% endfor %}
+            </div>
+
+            {% if current_user.role == 'officer' and g.status != 'Settled' %}
+                <form class="proof" method="post" enctype="multipart/form-data"
+                      action="{{ url_for('grievances.upload_proof', grievance_id=g.id) }}">
+
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <label>
+                        Visit proof
+                        <input type="file" name="proof" required accept=".jpg,.jpeg,.png,.webp">
+                    </label>
+
+                    <label>
+                        Visit note
+                        <input name="note" maxlength="500">
+                    </label>
+
+                    <button type="submit" class="btn small">Submit for review</button>
+                </form>
+
+                <form method="post"
+                      action="{{ url_for('grievances.escalate', grievance_id=g.id) }}">
+
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <button type="submit" class="linkbtn">
+                        Escalate to state authority queue
+                    </button>
+                </form>
+            {% endif %}
+
+            {% if current_user.role == 'admin' and g.status == 'Awaiting Human Review' %}
+                <form class="review" method="post"
+                      action="{{ url_for('grievances.review', grievance_id=g.id) }}">
+
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <input name="note" placeholder="Human review note" maxlength="500">
+
+                    <button type="submit" class="btn small" name="decision" value="approve">
+                        Approve &amp; settle
+                    </button>
+
+                    <button type="submit" class="btn small danger" name="decision" value="reject">
+                        Reject proof
+                    </button>
+                </form>
+            {% endif %}
+        </article>
+    {% else %}
+        <div class="empty">No grievances to display.</div>
+    {% endfor %}
+</section>
+{% endblock %}

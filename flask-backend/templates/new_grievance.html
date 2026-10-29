@@ -1,0 +1,73 @@
+
+{% extends "base.html" %}
+
+{% block title %}New grievance{% endblock %}
+
+{% block content %}
+<section class="formcard wide">
+    <p class="eyebrow">CITIZEN PORTAL</p>
+    <h1>Report a food safety issue</h1>
+
+    <p>
+        Describe the incident accurately. Evidence is stored privately
+        on this server in the starter configuration.
+    </p>
+
+    <form method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label>
+            Business name
+            <input name="business_name" required maxlength="180">
+        </label>
+
+        <label>
+            Issue type
+            <select name="issue_type">
+                <option>Offline</option>
+                <option>Online</option>
+            </select>
+        </label>
+
+        <label>
+            Keyword / short summary
+            <input name="keyword" required maxlength="180">
+        </label>
+
+        <label>
+            Location text
+            <input name="location" maxlength="300"
+                   placeholder="Area, city or landmark">
+        </label>
+
+        <label>
+            Description (at least 20 characters)
+            <textarea name="description" required minlength="20"
+                      maxlength="5000" rows="5"></textarea>
+        </label>
+
+        <label>
+            Warnings received
+            <select name="warning_reported">
+                <option>No</option>
+                <option>Yes - from business</option>
+                <option>Yes - from official</option>
+            </select>
+        </label>
+
+        <label>
+            Evidence photo (JPG, PNG, WEBP)
+            <input type="file" name="evidence" required
+                   accept=".jpg,.jpeg,.png,.webp">
+        </label>
+
+        <label>
+            Invoice (required for online complaint)
+            <input type="file" name="invoice"
+                   accept=".jpg,.jpeg,.png,.webp,.pdf">
+        </label>
+
+        <button type="submit" class="btn">Submit grievance</button>
+    </form>
+</section>
+{% endblock %}
