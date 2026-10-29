@@ -1,0 +1,70 @@
+
+{% extends "base.html" %}
+
+{% block title %}Create account{% endblock %}
+
+{% block content %}
+<section class="formcard">
+    <p class="eyebrow">CITIZEN PORTAL</p>
+
+    <h1>Create your account</h1>
+
+    <p>
+        Use only contact details you are comfortable using in this
+        test system. Do not enter Aadhaar, PAN or bank details.
+    </p>
+
+    <form method="post">
+        <input
+            type="hidden"
+            name="csrf_token"
+            value="{{ csrf_token() }}"
+        >
+
+        <label>
+            Full name
+            <input
+                type="text"
+                name="name"
+                required
+                maxlength="120"
+            >
+        </label>
+
+        <label>
+            Email
+            <input
+                type="email"
+                name="email"
+                maxlength="254"
+            >
+        </label>
+
+        <label>
+            Mobile number
+            <input
+                type="tel"
+                name="phone"
+                maxlength="30"
+            >
+        </label>
+
+        <label>
+            Password (12+ characters)
+            <input
+                type="password"
+                name="password"
+                minlength="12"
+                required
+                autocomplete="new-password"
+            >
+        </label>
+
+        <button type="submit" class="btn">Create account</button>
+    </form>
+
+    <p class="small">
+        Account verification provider must be configured before public launch.
+    </p>
+</section>
+{% endblock %}
