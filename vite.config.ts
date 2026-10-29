@@ -5,6 +5,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // GitHub Pages serves this project under /FOOD-SAFETY/, not the domain root.
+    base: '/FOOD-SAFETY/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
